@@ -31,6 +31,7 @@ os.makedirs(MEM_DIR, exist_ok=True)
 sys.path.insert(0, LIB_DIR)
 
 MEM_FILE = os.path.join(MEM_DIR, "predictions_log.csv")
+DEFAULT_BAND_PERCENT = 5.0
 
 
 # =============================================================
@@ -195,6 +196,13 @@ def ensure_memory_file() -> None:
     if not os.path.exists(MEM_FILE):
         with open(MEM_FILE, "w", encoding="utf-8") as handle:
             handle.write(HEADER)
+
+
+def safe_float(value: Optional[str], fallback: float) -> float:
+    try:
+        return float(str(value))
+    except Exception:
+        return fallback
 
 
 def append_prediction_record(
@@ -504,6 +512,10 @@ class EngineResult:
     prediction: float
     confidence: float
     comment: str = ""
+    range_low: Optional[float] = None
+    range_high: Optional[float] = None
+    band_percent: Optional[float] = None
+    band_probability: Optional[float] = None
 
 
 FEATURE_COLUMNS = [
@@ -563,6 +575,65 @@ def technical_engine(df) -> Optional[EngineResult]:  # type: ignore[override]
         prediction=float(prediction),
         confidence=float(confidence),
         comment=", ".join(comment_bits),
+    )
+
+
+def analyst_consensus_engine(ticker: str, last_close: float) -> Optional[EngineResult]:  # type: ignore[override]
+    if yfinance is None:
+        return None
+
+    def _coerce(value) -> Optional[float]:
+        try:
+            return float(value)
+        except Exception:
+            return None
+
+    info = None
+    try:
+        info = yfinance.Ticker(ticker).get_info()
+    except Exception:
+        try:
+            info = yfinance.Ticker(ticker).info
+        except Exception:
+            return None
+
+    if not info:
+        return None
+
+    target_mean = _coerce(info.get("targetMeanPrice"))
+    target_high = _coerce(info.get("targetHighPrice"))
+    target_low = _coerce(info.get("targetLowPrice"))
+    analyst_count = safe_int(info.get("numberOfAnalystOpinions"), 0)
+
+    fallback_price = _coerce(info.get("currentPrice")) or _coerce(
+        info.get("regularMarketPrice")
+    )
+    prediction = target_mean or (
+        (target_high and target_low and (target_high + target_low) / 2)
+    ) or fallback_price or last_close
+
+    spread = 0.0
+    if prediction and target_high and target_low:
+        spread = (target_high - target_low) / prediction
+
+    confidence = 5 + math.log1p(max(analyst_count, 1)) - spread * 2
+    confidence = max(3.0, min(9.5, confidence))
+
+    comments = []
+    if analyst_count:
+        comments.append(f"{analyst_count} analysts")
+    if target_high and target_low:
+        comments.append(f"range {target_low:.2f}-{target_high:.2f}")
+    if target_mean:
+        comments.append(f"consensus {target_mean:.2f}")
+
+    return EngineResult(
+        engine="AnalystConsensus",
+        prediction=prediction,
+        confidence=confidence,
+        comment=", ".join(comments) or "Analyst targets",
+        range_low=target_low,
+        range_high=target_high,
     )
 
 
@@ -750,18 +821,47 @@ def news_sentiment_engine(
 # CONSOLIDATION / REPORTING
 # =============================================================
 
+
+def estimate_band_probability(volatility: float, horizon: int, band_percent: float) -> float:
+    if volatility <= 0:
+        return 1.0
+
+    horizon = max(1, horizon)
+    sigma = volatility * math.sqrt(horizon)
+    band_fraction = band_percent / 100.0
+    if sigma == 0:
+        return 1.0
+
+    z = band_fraction / (sigma * math.sqrt(2))
+    prob = math.erf(z)
+    return max(0.0, min(1.0, prob))
+
+
 def consolidate_predictions(
     ticker: str,
     period: str,
     horizon: int,
     df,
     engines: Iterable[EngineResult],
+    band_percent: float = DEFAULT_BAND_PERCENT,
 ) -> List[EngineResult]:
     results = [engine for engine in engines if engine is not None]
     last_close = float(df.iloc[-1]["Close"])
     target_time = datetime.now() + timedelta(hours=horizon if period == "hour" else horizon * 24)
 
+    returns = df["Close"].pct_change().dropna()
+    recent_vol = float(returns.tail(120).std()) if not returns.empty else 0.0
+    band_prob = estimate_band_probability(recent_vol, horizon, band_percent)
+    spread = band_percent / 100.0
+
     for engine in results:
+        if engine.range_low is None or engine.range_high is None:
+            engine.range_low = engine.prediction * (1 - spread)
+            engine.range_high = engine.prediction * (1 + spread)
+        if engine.band_percent is None:
+            engine.band_percent = band_percent
+        if engine.band_probability is None:
+            engine.band_probability = band_prob
         append_prediction_record(
             ticker=ticker,
             period=period,
@@ -777,21 +877,42 @@ def consolidate_predictions(
 
 def format_prediction_table(results: List[EngineResult], last_close: float) -> str:
     if not tabulate_mod:
-        return "\n".join(
-            f"{res.engine}: {res.prediction:.2f} ({res.confidence:.1f}/10) - {res.comment}"
-            for res in results
-        )
+        lines = []
+        for res in results:
+            low = res.range_low if res.range_low is not None else res.prediction
+            high = res.range_high if res.range_high is not None else res.prediction
+            band_width = res.band_percent if res.band_percent is not None else DEFAULT_BAND_PERCENT
+            prob = res.band_probability * 100 if res.band_probability is not None else None
+            prob_str = f"{prob:.1f}% @ ±{band_width:.1f}%" if prob is not None else "-"
+            lines.append(
+                f"{res.engine}: {res.prediction:.2f} ({res.confidence:.1f}/10) "
+                f"range {low:.2f}-{high:.2f} prob {prob_str} - {res.comment}"
+            )
+        return "\n".join(lines)
     rows = []
     for res in results:
         delta = ((res.prediction / last_close) - 1) * 100 if last_close else 0.0
+        range_str = "-"
+        if res.range_low is not None and res.range_high is not None:
+            range_str = f"{res.range_low:.2f}–{res.range_high:.2f}"
+        band_width = res.band_percent if res.band_percent is not None else DEFAULT_BAND_PERCENT
+        prob_str = "-"
+        if res.band_probability is not None:
+            prob_str = f"{res.band_probability * 100:.1f}% @ ±{band_width:.1f}%"
         rows.append([
             res.engine,
             f"{res.prediction:.2f}",
+            range_str,
+            prob_str,
             f"{delta:+.2f}%",
             f"{res.confidence:.1f}/10",
             res.comment,
         ])
-    return tabulate_mod.tabulate(rows, headers=["Engine", "Target", "Δ vs Close", "Confidence", "Notes"], tablefmt="github")
+    return tabulate_mod.tabulate(
+        rows,
+        headers=["Engine", "Target", "Range", "Prob", "Δ vs Close", "Confidence", "Notes"],
+        tablefmt="github",
+    )
 
 
 # =============================================================
@@ -937,6 +1058,7 @@ def run_forecast_workflow(
     ticker: Optional[str] = None,
     period_choice: Optional[str] = None,
     horizon: Optional[int] = None,
+    band: Optional[float] = None,
     pause: bool = True,
 ) -> None:
     print("\n=== Forecast (Technical + ML + NN) ===\n")
@@ -974,6 +1096,20 @@ def run_forecast_workflow(
         )
     )
     horizon = max(1, horizon)
+    band = (
+        band
+        if band is not None
+        else safe_float(
+            guided_prompt(
+                "+/- band for probability (%)",
+                "Set the percentage band to estimate hit probability around each target.",
+                f"{DEFAULT_BAND_PERCENT:.1f}",
+                f"{DEFAULT_BAND_PERCENT:.1f}",
+            ),
+            DEFAULT_BAND_PERCENT,
+        )
+    )
+    band = max(0.5, band)
     df = fetch_history(ticker, period_choice, bars_back=600)
     if df is None or df.empty:
         print("No data downloaded.")
@@ -998,19 +1134,23 @@ def run_forecast_workflow(
             None,
             [
                 technical_engine(df),
+                analyst_consensus_engine(ticker, last_close),
                 random_forest_engine(df),
                 neural_network_engine(df),
                 news_sentiment_engine(ticker, df, news_context),
             ],
         ),
+        band_percent=band,
     )
 
     if not results:
         print("No engine produced a forecast.")
         return
 
-    last_close = float(df.iloc[-1]["Close"])
     print(format_prediction_table(results, last_close))
+    print(
+        f"Probabilities reflect the chance of landing within ±{band:.1f}% of each target using recent volatility."
+    )
     print()
     sources = news_context.get("sources", []) if isinstance(news_context, dict) else []
     if sources:
@@ -1091,8 +1231,10 @@ This refactored build downloads market data via yfinance, computes a stable
 set of technical indicators with pandas and produces four forecasts:
 
 1. Technical: rules that use SMA, RSI, MACD and volatility.
-2. RandomForest: supervised model trained on indicators.
-3. Neural Network: PyTorch LSTM when torch is installed, otherwise an sklearn
+2. AnalystConsensus: aggregates published analyst targets for an external
+   view.
+3. RandomForest: supervised model trained on indicators.
+4. Neural Network: PyTorch LSTM when torch is installed, otherwise an sklearn
    MLP fallback.
 4. NewsSentiment: headline tone and nearby earnings events weighted into the
    forecast, with the factored sources listed below the table.
@@ -1100,6 +1242,8 @@ set of technical indicators with pandas and produces four forecasts:
 All predictions are logged to ./memory/predictions_log.csv together with
 horizon information.  On each run the tool attempts to fetch the actual price
 for previous targets so we accumulate real-world error metrics over time.
+Forecasts now also report a probability of closing within a configurable +/-
+band around each target based on recent volatility.
         """
     )
     maybe_pause(pause)
@@ -1248,6 +1392,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
         dest="plot_path",
         help="Save plots to this file instead of showing a window.",
     )
+    parser.add_argument(
+        "--band",
+        type=float,
+        help="Set the +/- band (in %) used to estimate hit probability around predictions.",
+    )
     return parser
 
 
@@ -1279,6 +1428,7 @@ def dispatch_cli_action(args) -> None:
             ticker=args.ticker,
             period_choice=args.period,
             horizon=args.horizon,
+            band=args.band,
             pause=False,
         )
     elif action == "train":
