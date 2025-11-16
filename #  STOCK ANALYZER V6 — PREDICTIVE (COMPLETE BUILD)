@@ -779,7 +779,7 @@ for previous targets so we accumulate real-world error metrics over time.
 
 
 def run_diagnostics(pause: bool = True) -> None:
-    print(f"\n=== Diagnostics (build {VERSION}) ===\n")
+    print(f"\n=== System Diagnostics for Market Monitoring & ML (build {VERSION}) ===\n")
     dependency_states = [
         ("yfinance", yfinance is not None),
         ("pandas", pd is not None),
@@ -844,7 +844,7 @@ def main_menu():
 3. Download Historical CSV
 4. Forecast (Technical + ML + NN)
 5. Help
-6. Diagnostics
+6. System Diagnostics (Monitoring/ML)
 7. Exit
 """
         )
