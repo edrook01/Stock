@@ -1403,21 +1403,7 @@ def run_self_test(pause: bool = True) -> None:
 
 def main_menu():
     while True:
-        print(
-            f"""
-=== Stock Analyzer {VERSION} ===
-1. SMA 20 + 50 Report
-2. Plot Price + SMA
-3. Download Historical CSV
-4. Forecast (Technical + ML + NN)
-5. Training loop / self-eval
-6. Help
-7. System Diagnostics (Monitoring/ML)
-8. Offline self-test (synthetic data)
-9. Exit
-"""
-            f"\n{divider('=')}\nStock Analyzer {VERSION} — Main Menu\n{divider('-')}"
-        )
+        print(f"\n{divider('=')}\nStock Analyzer {VERSION} — Main Menu\n{divider('-')}")
         print_panel(
             "Select the workflow you want to run:",
             [
