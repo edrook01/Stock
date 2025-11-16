@@ -448,8 +448,8 @@ def random_forest_engine(df) -> Optional[EngineResult]:  # type: ignore[override
     model.fit(X_train, y_train)
     preds = model.predict(X_test)
     mae = float(mean_absolute_error(y_test, preds))
-    last_features = features.iloc[-1]
-    next_price = float(model.predict([last_features])[0])
+    last_features = features.iloc[[-1]]
+    next_price = float(model.predict(last_features)[0])
 
     confidence = max(3.0, 10 - (mae / (y_test.mean() or 1)) * 50)
 
@@ -553,7 +553,7 @@ def _mlp_engine(features, target):  # type: ignore[override]
     model.fit(X_train, y_train)
     preds = model.predict(X_test)
     mae = float(mean_absolute_error(y_test, preds))
-    next_price = float(model.predict([features.iloc[-1]])[0])
+    next_price = float(model.predict(features.iloc[[-1]])[0])
     confidence = max(2.0, 8 - mae / (y_test.mean() or 1) * 50)
 
     return EngineResult(
