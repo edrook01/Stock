@@ -1,0 +1,1086 @@
+# ==========================================
+#  STOCK ANALYZER V4 - PREDICTIVE
+#  Self-contained, local libs, technical + ML + NN, GPU-aware
+# ==========================================
+
+import os
+import sys
+import subprocess
+import time
+import importlib
+from datetime import datetime, timedelta
+
+print("\n=== Stock Analyzer V4 - Predictive ===\n")
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+LIB_DIR = os.path.join(BASE_DIR, "libs")
+MEM_DIR = os.path.join(BASE_DIR, "memory")
+os.makedirs(LIB_DIR, exist_ok=True)
+os.makedirs(MEM_DIR, exist_ok=True)
+sys.path.insert(0, LIB_DIR)
+
+MEM_FILE = os.path.join(MEM_DIR, "predictions_log.csv")
+
+# -------------------------------
+# Package specs (import_name: (pip_name, version))
+# -------------------------------
+PACKAGE_SPECS = {
+    "yfinance": ("yfinance", "0.2.66"),
+    "pandas": ("pandas", "2.2.2"),
+    "numpy": ("numpy", "1.26.4"),           # safe vs most binary addons
+    "ta": ("ta", "0.11.0"),
+    "pandas_ta": ("pandas_ta", "0.4.71b0"),
+    "sklearn": ("scikit-learn", "1.3.2"),
+    "requests": ("requests", "2.32.3"),
+    "tabulate": ("tabulate", "0.9.0"),
+    "matplotlib": ("matplotlib", "3.8.4"),
+    "torch": ("torch", None),               # optional, latest compatible
+}
+
+
+# -------------------------------
+# Logging helper
+# -------------------------------
+def log(msg: str):
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    print(f"[{ts}] {msg}")
+
+
+# -------------------------------
+# Install packages into libs/
+# -------------------------------
+def install_packages_local():
+    log("Checking / installing Python packages into ./libs ...")
+    for import_name, (pip_name, version) in PACKAGE_SPECS.items():
+        # torch is optional; we'll try but won't crash on failure
+        optional = (import_name == "torch")
+
+        try:
+            importlib.import_module(import_name)
+            log(f"✔ {import_name} already available")
+            continue
+        except Exception:
+            log(f"✘ {import_name} not importable, installing {pip_name} ...")
+
+        pkg_str = pip_name if version is None else f"{pip_name}=={version}"
+
+        try:
+            subprocess.check_call([
+                sys.executable, "-m", "pip", "install",
+                pkg_str,
+                "--target", LIB_DIR,
+                "--upgrade",
+                "--no-warn-script-location",
+            ])
+            log(f"✔ Installed {pkg_str} into ./libs")
+        except Exception as e:
+            log(f"!! Failed to install {pkg_str}: {e}")
+            if optional:
+                log(f"Skipping optional package {pip_name}")
+                continue
+            else:
+                print("Fatal dependency error. Exiting.")
+                sys.exit(1)
+
+    log("All required packages checked.\n")
+    time.sleep(0.5)
+
+
+# -------------------------------
+# Safe import helper
+# -------------------------------
+def safe_import(name):
+    try:
+        return importlib.import_module(name)
+    except Exception as e:
+        log(f"Import error for {name}: {e}")
+        return None
+
+
+# -------------------------------
+# BOOTSTRAP
+# -------------------------------
+def bootstrap():
+    print("Bootstrapping environment...\n")
+    install_packages_local()
+
+    global yfinance, pd, np, ta_mod, pta, skl, requests_mod, tabulate_mod
+    yfinance = safe_import("yfinance")
+    pd = safe_import("pandas")
+    np = safe_import("numpy")
+    ta_mod = safe_import("ta")
+    pta = safe_import("pandas_ta")
+    skl = safe_import("sklearn")
+    requests_mod = safe_import("requests")
+    tabulate_mod = safe_import("tabulate")
+
+    if yfinance is None or pd is None or np is None:
+        print("Critical imports failed (yfinance/pandas/numpy). Exiting.")
+        sys.exit(1)
+
+    log("Bootstrap complete.\n")
+
+
+# ======================================================
+# MEMORY / LEARNING
+# ======================================================
+
+def ensure_memory_file():
+    if not os.path.exists(MEM_FILE):
+        with open(MEM_FILE, "w", encoding="utf-8") as f:
+            f.write("timestamp,ticker,period,horizon_bars,engine,predicted_price,last_close,target_time,actual_price,abs_error,pct_error\n")
+
+
+def append_prediction_record(ticker, period, horizon_bars, engine, predicted_price, last_close, target_time):
+    ensure_memory_file()
+    ts = datetime.now().isoformat()
+    line = f"{ts},{ticker},{period},{horizon_bars},{engine},{predicted_price},{last_close},{target_time},,,\n"
+    with open(MEM_FILE, "a", encoding="utf-8") as f:
+        f.write(line)
+
+
+def update_memory_accuracy_for_ticker(ticker):
+    """Read memory log, fill in actual_price for any old predictions whose target_time has passed.
+       Returns per-engine historical MAPE (if any) as dict: {engine: mape_percent}"""
+    ensure_memory_file()
+    try:
+        df = pd.read_csv(MEM_FILE)
+    except Exception:
+        return {}
+
+    if df.empty:
+        return {}
+
+    # Filter rows for ticker, missing actual_price, and target_time < now
+    now = datetime.now()
+    pending = []
+    for idx, row in df.iterrows():
+        if row["ticker"] != ticker:
+            continue
+        if pd.isna(row.get("actual_price")):
+            try:
+                t = datetime.fromisoformat(str(row["target_time"]))
+            except Exception:
+                continue
+            if t < now:
+                pending.append(idx)
+
+    if not pending:
+        # still compute existing errors to return stats
+        return _memory_compute_mape(df, ticker)
+
+    # For speed, get global min/max date to download once per ticker
+    try:
+        tmins = []
+        tmaxs = []
+        for idx in pending:
+            t = datetime.fromisoformat(str(df.loc[idx, "target_time"]))
+            tmins.append(t)
+            tmaxs.append(t)
+        min_date = min(tmins) - timedelta(days=3)
+        max_date = max(tmaxs) + timedelta(days=3)
+    except Exception:
+        # fallback: 2 years
+        min_date = now - timedelta(days=730)
+        max_date = now
+
+    # fetch daily data for that ticker over the range
+    try:
+        hist = yfinance.download(ticker, start=min_date.date(), end=(max_date.date() + timedelta(days=1)))
+    except Exception:
+        hist = None
+
+    def lookup_price(dt: datetime):
+        if hist is None or hist.empty:
+            return None
+        # find closest date not after dt (i.e., last trading day <= dt)
+        dates = hist.index
+        # convert to datetime.date
+        candidates = [d for d in dates if d.to_pydatetime() <= dt]
+        if not candidates:
+            return None
+        closest = max(candidates)
+        return float(hist.loc[closest, "Close"])
+
+    # Update df with actual_price, errors
+    changed = False
+    for idx in pending:
+        row = df.loc[idx]
+        try:
+            t = datetime.fromisoformat(str(row["target_time"]))
+        except Exception:
+            continue
+        act = lookup_price(t)
+        if act is None:
+            continue
+        pred = float(row["predicted_price"])
+        abs_err = abs(act - pred)
+        pct_err = abs_err / act * 100 if act != 0 else None
+        df.at[idx, "actual_price"] = act
+        df.at[idx, "abs_error"] = abs_err
+        df.at[idx, "pct_error"] = pct_err
+        changed = True
+
+    if changed:
+        df.to_csv(MEM_FILE, index=False)
+
+    return _memory_compute_mape(df, ticker)
+
+
+def _memory_compute_mape(df, ticker):
+    sub = df[(df["ticker"] == ticker) & (~df["pct_error"].isna())]
+    if sub.empty:
+        return {}
+    res = {}
+    for eng in sorted(sub["engine"].unique()):
+        s = sub[sub["engine"] == eng]["pct_error"].dropna()
+        if not s.empty:
+            res[eng] = float(s.mean())
+    return res
+
+
+# ======================================================
+# DATA + INDICATORS
+# ======================================================
+
+def fetch_history(ticker, period_choice, bars_back=600):
+    """
+    Fully crash-proof historical fetcher.
+    Always returns a dataframe with a valid Close column, or None.
+    """
+    # ---- Normalize period choice -----------------------------------------
+    if period_choice not in ("hour", "day", "week"):
+        log(f"Invalid period '{period_choice}', defaulting to day.")
+        period_choice = "day"
+
+    if period_choice == "hour":
+        interval = "60m"
+        period = "730h"
+    elif period_choice == "week":
+        interval = "1wk"
+        period = "5y"
+    else:
+        interval = "1d"
+        period = "5y"
+
+    log(f"Downloading {ticker} history ({period_choice}, {interval}, {period}) ...")
+
+    # ---- Safe download ----------------------------------------------------
+    try:
+        df = yfinance.download(
+            ticker,
+            period=period,
+            interval=interval,
+            progress=False,
+            auto_adjust=False            # <<<<<< CRITICAL FIX
+        )
+    except Exception as e:
+        log(f"Download error: {e}")
+        return None
+
+    # ---- Handle empty results --------------------------------------------
+    if df is None or df.empty:
+        log("No data returned from Yahoo.")
+        return None
+
+    # ---- Fix MultiIndex columns (common) ---------------------------------
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = [col[0] if isinstance(col, tuple) else col for col in df.columns]
+
+    # ---- Guarantee close column exists -----------------------------------
+    lower_cols = [c.lower() for c in df.columns]
+
+    if "close" in lower_cols:
+        pass  # OK
+
+    elif "adj close" in lower_cols:
+        log("Yahoo returned no 'Close'. Using 'Adj Close' as Close.")
+        df["Close"] = df[[c for c in df.columns if c.lower() == "adj close"][0]]
+
+    elif "open" in lower_cols:
+        log("Yahoo returned no OHLC. Synthesizing Close from Open.")
+        df["Close"] = df[[c for c in df.columns if c.lower() == "open"][0]]
+
+    else:
+        log("No usable OHLC columns; data is corrupted.")
+        return None
+
+    # ---- Clean close column ----------------------------------------------
+    df = df.copy()
+    df["Close"] = pd.to_numeric(df["Close"], errors="coerce")
+    df = df.dropna(subset=["Close"])
+
+    if df.empty:
+        log("Close column became empty after cleanup.")
+        return None
+
+    # ---- Trim window ------------------------------------------------------
+    if len(df) > bars_back:
+        df = df.tail(bars_back)
+
+    return df
+
+    # Try pandas_ta first
+    if pta is not None:
+        try:
+            df["RSI14"] = pta.rsi(df["Close"], length=14)
+            macd = pta.macd(df["Close"])
+            if macd is not None and not isinstance(macd, dict):
+                for col in macd.columns:
+                    df[col] = macd[col]
+                if "MACD_12_26_9" in df.columns and "MACDs_12_26_9" in df.columns:
+                    df["MACD"] = df["MACD_12_26_9"]
+                    df["MACD_signal"] = df["MACDs_12_26_9"]
+                    df["MACD_hist"] = df["MACDh_12_26_9"]
+            bb = pta.bbands(df["Close"], length=20)
+            if bb is not None:
+                for col in bb.columns:
+                    df[col] = bb[col]
+            df["ATR14"] = pta.atr(df["High"], df["Low"], df["Close"], length=14)
+            df["OBV"] = pta.obv(df["Close"], df["Volume"])
+            adx = pta.adx(df["High"], df["Low"], df["Close"], length=14)
+            if adx is not None:
+                for col in adx.columns:
+                    df[col] = adx[col]
+            stoch = pta.stoch(df["High"], df["Low"], df["Close"], k=14, d=3)
+            if stoch is not None:
+                for col in stoch.columns:
+                    df[col] = stoch[col]
+            df["WILLR14"] = pta.willr(df["High"], df["Low"], df["Close"], length=14)
+        except Exception as e:
+            log(f"pandas_ta error, falling back to ta where possible: {e}")
+
+    # Fallback to ta library
+    if ta_mod is not None:
+        try:
+            if "RSI14" not in df.columns:
+                df["RSI14"] = ta_mod.momentum.rsi(df["Close"], window=14)
+            if "ATR14" not in df.columns:
+                df["ATR14"] = ta_mod.volatility.average_true_range(df["High"], df["Low"], df["Close"], window=14)
+            if "OBV" not in df.columns:
+                df["OBV"] = ta_mod.volume.on_balance_volume(df["Close"], df["Volume"])
+        except Exception as e:
+            log(f"ta fallback error: {e}")
+
+    # Distances and volatility
+    df["Dist_SMA20"] = (df["Close"] - df["SMA20"]) / df["SMA20"] * 100
+    df["Dist_SMA50"] = (df["Close"] - df["SMA50"]) / df["SMA50"] * 100
+    df["Volatility20"] = df["Close"].rolling(20, min_periods=1).std()
+
+    return df
+
+
+def compute_simple_support_resistance(df, lookback=60):
+    try:
+        recent = df.tail(lookback)
+        support = recent["Low"].nsmallest(3).median()
+        resistance = recent["High"].nlargest(3).median()
+        return float(support), float(resistance)
+    except Exception:
+        return None, None
+
+
+# ======================================================
+# TECHNICAL PREDICTOR (MODE A)
+# ======================================================
+
+def technical_projection(df, horizon_bars, period_choice):
+    """
+    Rule-based projection using slope, volatility, RSI, MACD, distance from SMAs, etc.
+    Returns dict with expected_pct, predicted_price, backtest_mape, explanation.
+    """
+    df = compute_indicators(df)
+    if len(df) < 60:
+        return {"error": "not_enough_data"}
+
+    latest = df.iloc[-1]
+    last_close = float(latest["Close"])
+    sma20 = float(latest["SMA20"])
+    sma50 = float(latest["SMA50"]) if not pd.isna(latest["SMA50"]) else sma20
+
+    # slope of SMA20 over last N bars
+    N_slope = min(50, len(df)-1)
+    sma20_past = df["SMA20"].iloc[-N_slope]
+    slope20 = (sma20 - sma20_past) / max(sma20_past, 1e-9)
+
+    vol20 = float(df["Volatility20"].iloc[-1])
+    vol_pct = (vol20 / last_close * 100) if last_close != 0 else 0.0
+
+    rsi = latest.get("RSI14", None)
+    try:
+        rsi = float(rsi)
+    except Exception:
+        rsi = None
+
+    macd_val = latest.get("MACD", None)
+    macd_sig = latest.get("MACD_signal", None)
+    macd_hist = latest.get("MACD_hist", None)
+
+    # Base drift from trend and volatility
+    base = slope20 * 100 * (horizon_bars ** 0.5)
+
+    # RSI adjustment
+    rsi_adj = 0.0
+    if rsi is not None:
+        if rsi > 70:    # overbought -> negative adjustment
+            rsi_adj = -((rsi - 70) / 30) * vol_pct
+        elif rsi < 30:  # oversold -> positive adjustment
+            rsi_adj = ((30 - rsi) / 30) * vol_pct
+
+    # MACD trend bias
+    macd_adj = 0.0
+    try:
+        if macd_val is not None and macd_sig is not None:
+            if macd_val > macd_sig:
+                macd_adj = +0.3 * vol_pct
+            else:
+                macd_adj = -0.3 * vol_pct
+    except Exception:
+        pass
+
+    # Distance from SMA20/50 influences mean reversion
+    dist20 = float(latest["Dist_SMA20"])
+    dist50 = float(latest["Dist_SMA50"])
+    mean_rev_adj = 0.0
+    if abs(dist20) > 5:
+        mean_rev_adj -= (dist20 / 20.0) * vol_pct
+    if abs(dist50) > 8:
+        mean_rev_adj -= (dist50 / 25.0) * vol_pct
+
+    import math
+    expected_pct = base + rsi_adj + macd_adj + mean_rev_adj + vol_pct * math.sqrt(horizon_bars) * 0.2
+    expected_pct = max(min(expected_pct, 40), -40)  # clamp
+
+    predicted_price = last_close * (1 + expected_pct / 100.0)
+
+    # Backtest to estimate MAPE
+    backtest_mape = technical_backtest_mape(df, horizon_bars)
+
+    explanation = {
+        "last_close": last_close,
+        "slope20_pct": slope20 * 100,
+        "vol_pct": vol_pct,
+        "rsi": rsi,
+        "dist20": dist20,
+        "dist50": dist50,
+        "rsi_adj": rsi_adj,
+        "macd_adj": macd_adj,
+        "mean_rev_adj": mean_rev_adj,
+        "notes": [
+            "Positive slope20 -> upward drift, negative -> downward drift",
+            "RSI>70 penalizes, RSI<30 boosts mean reversion",
+            "MACD above signal adds bullish bias, below adds bearish bias",
+            "Large % distance from SMAs adds mean-reversion correction"
+        ]
+    }
+
+    return {
+        "expected_pct": float(round(expected_pct, 3)),
+        "predicted_price": float(round(predicted_price, 4)),
+        "backtest_mape": backtest_mape,
+        "explanation": explanation
+    }
+
+
+def technical_backtest_mape(df, horizon_bars, samples=60):
+    df = compute_indicators(df)
+    if len(df) < horizon_bars + 30:
+        return None
+    import math
+    errors = []
+    for i in range(len(df) - horizon_bars - 1 - samples, len(df) - horizon_bars - 1):
+        if i <= 0:
+            continue
+        window = df.iloc[:i+1]
+        latest = window.iloc[-1]
+        last_close = latest["Close"]
+        sma20 = latest["SMA20"]
+        sma20_past = window["SMA20"].iloc[max(0, len(window)-20)]
+        slope20 = (sma20 - sma20_past) / max(sma20_past, 1e-9)
+        vol20 = window["Volatility20"].iloc[-1]
+        vol_pct = (vol20 / last_close * 100) if last_close != 0 else 0
+        expected_pct = slope20 * 100 * (horizon_bars ** 0.5) + vol_pct * math.sqrt(horizon_bars) * 0.2
+        expected_pct = max(min(expected_pct, 40), -40)
+        pred = last_close * (1 + expected_pct / 100)
+        actual = df["Close"].iloc[i + horizon_bars]
+        err = abs(actual - pred) / actual * 100 if actual != 0 else None
+        if err is not None:
+            errors.append(err)
+    if not errors:
+        return None
+    return float(sum(errors) / len(errors))
+
+
+# ======================================================
+# ML FEATURES + MODELS (B & C)
+# ======================================================
+
+def build_feature_matrix(df, horizon_bars):
+    df = compute_indicators(df)
+    # drop rows with many NaN
+    df = df.dropna(subset=["Close", "SMA20", "SMA50"], how="any")
+    if len(df) <= horizon_bars + 10:
+        return None, None
+
+    rows = []
+    targets = []
+    for i in range(len(df) - horizon_bars):
+        r = df.iloc[i]
+        feat = {
+            "close": r["Close"],
+            "pct_change": r.get("Pct_Change", 0),
+            "sma20": r["SMA20"],
+            "sma50": r["SMA50"],
+            "sma200": r.get("SMA200", r["SMA50"]),
+            "ema12": r.get("EMA12", r["Close"]),
+            "ema26": r.get("EMA26", r["Close"]),
+            "dist20": r.get("Dist_SMA20", 0),
+            "dist50": r.get("Dist_SMA50", 0),
+            "vol20": r.get("Volatility20", 0),
+            "rsi14": r.get("RSI14", 50),
+            "atr14": r.get("ATR14", 0),
+            "obv": r.get("OBV", 0),
+            "volume": r.get("Volume", 0),
+        }
+        rows.append(feat)
+        targets.append(df["Close"].iloc[i + horizon_bars])
+
+    X = pd.DataFrame(rows)
+    y = pd.Series(targets)
+    return X, y
+
+
+def ml_random_forest_predict(X, y):
+    """Train RandomForest and predict next row. Returns (prediction, stats)."""
+    from sklearn.ensemble import RandomForestRegressor
+    from sklearn.model_selection import train_test_split
+    from sklearn.metrics import mean_absolute_percentage_error, r2_score
+
+    if len(X) < 60:
+        return None, {"error": "not_enough_data"}
+
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.25, shuffle=False)
+    model = RandomForestRegressor(n_estimators=120, max_depth=10, random_state=42)
+    model.fit(X_train, y_train)
+    preds = model.predict(X_test)
+    try:
+        mape = float(mean_absolute_percentage_error(y_test, preds) * 100)
+    except Exception:
+        mape = None
+    try:
+        r2 = float(r2_score(y_test, preds))
+    except Exception:
+        r2 = None
+    # predict the last row (most recent data)
+    pred_next = float(model.predict(X.tail(1))[0])
+    return pred_next, {"mape": mape, "r2": r2}
+
+
+def nn_lstm_predict(X, y, use_gpu=True):
+    """
+    Advanced mode C: LSTM-like network using PyTorch (if available).
+    Fallback: sklearn MLP.
+    Returns (prediction, meta).
+    """
+    # try torch
+    try:
+        import torch
+        import torch.nn as nn
+
+        device = torch.device("cuda" if (use_gpu and torch.cuda.is_available()) else "cpu")
+        log(f"NN using PyTorch on device: {device}")
+
+        Xnp = X.to_numpy().astype(float)
+        ynp = y.to_numpy().astype(float)
+
+        # turn into sequences of fixed length (e.g., 10)
+        seq_len = 10
+        if len(Xnp) <= seq_len + 5:
+            raise RuntimeError("Not enough rows for LSTM")
+
+        seqs = []
+        targets = []
+        for i in range(len(Xnp) - seq_len):
+            seqs.append(Xnp[i:i+seq_len])
+            targets.append(ynp[i+seq_len])
+
+        import numpy as np
+        seqs = np.stack(seqs)  # [N, seq_len, features]
+        targets = np.array(targets).reshape(-1, 1)
+
+        X_t = torch.tensor(seqs, dtype=torch.float32).to(device)
+        y_t = torch.tensor(targets, dtype=torch.float32).to(device)
+
+        class SimpleLSTM(nn.Module):
+            def __init__(self, input_dim, hidden_dim=32):
+                super().__init__()
+                self.lstm = nn.LSTM(input_dim, hidden_dim, batch_first=True)
+                self.fc = nn.Linear(hidden_dim, 1)
+            def forward(self, x):
+                out, _ = self.lstm(x)
+                out = out[:, -1, :]
+                out = self.fc(out)
+                return out
+
+        input_dim = Xnp.shape[1]
+        model = SimpleLSTM(input_dim, hidden_dim=32).to(device)
+        opt = torch.optim.Adam(model.parameters(), lr=1e-3)
+        loss_fn = nn.MSELoss()
+
+        epochs = 25
+        model.train()
+        for ep in range(epochs):
+            opt.zero_grad()
+            out = model(X_t)
+            loss = loss_fn(out, y_t)
+            loss.backward()
+            opt.step()
+            if ep % max(1, epochs // 5) == 0:
+                log(f"NN epoch {ep}/{epochs} loss={loss.item():.6f}")
+
+        # build last sequence
+        last_seq = Xnp[-seq_len:]
+        last_seq_t = torch.tensor(last_seq[None, :, :], dtype=torch.float32).to(device)
+        model.eval()
+        with torch.no_grad():
+            pred = model(last_seq_t).cpu().numpy().reshape(-1)[0]
+
+        return float(pred), {"framework": "torch", "device": str(device)}
+
+    except Exception as e:
+        log(f"PyTorch NN failed or unavailable, falling back to sklearn MLP: {e}")
+
+    # fallback: sklearn MLP
+    try:
+        from sklearn.neural_network import MLPRegressor
+        if len(X) < 60:
+            return None, {"error": "not_enough_data"}
+
+        model = MLPRegressor(hidden_layer_sizes=(64, 32), max_iter=500, random_state=42)
+        model.fit(X, y)
+        pred = float(model.predict(X.tail(1))[0])
+        return pred, {"framework": "sklearn_mlp"}
+    except Exception as e:
+        log(f"sklearn MLP failed: {e}")
+        return None, {"error": "nn_failed"}
+
+
+# ======================================================
+# CONFIDENCE SCORING
+# ======================================================
+
+def compute_confidence(eng_results, in_sample_stats, memory_mape, last_close):
+    """
+    eng_results: dict { 'technical':price, 'rf':price or None, 'nn':price or None }
+    in_sample_stats: dict like { 'technical_mape':x, 'rf_mape':y, 'nn_mape':z }
+    memory_mape: dict from update_memory_accuracy_for_ticker
+    Returns confidence 0–10 and breakdown explanation.
+    """
+    components = {}
+    scores = []
+
+    # convert MAPE to 0-10 scores
+    def score_from_mape(m):
+        if m is None:
+            return None
+        # 0% -> 10, 20% -> 6, 30% -> 4, 50% -> 0
+        s = 10 - (m * 0.2)
+        return max(0.0, min(10.0, s))
+
+    # 1) Technical backtest
+    t_mape = in_sample_stats.get("technical_mape")
+    t_hist = memory_mape.get("technical")
+    t_comb = None
+    if t_mape is not None and t_hist is not None:
+        t_comb = (t_mape * 0.6 + t_hist * 0.4)
+    elif t_mape is not None:
+        t_comb = t_mape
+    elif t_hist is not None:
+        t_comb = t_hist
+    t_score = score_from_mape(t_comb) if t_comb is not None else None
+    if t_score is not None:
+        scores.append(t_score)
+        components["technical_score"] = t_score
+
+    # 2) RF model
+    rf_mape = in_sample_stats.get("rf_mape")
+    rf_hist = memory_mape.get("rf")
+    rf_comb = None
+    if rf_mape is not None and rf_hist is not None:
+        rf_comb = (rf_mape * 0.5 + rf_hist * 0.5)
+    elif rf_mape is not None:
+        rf_comb = rf_mape
+    elif rf_hist is not None:
+        rf_comb = rf_hist
+    rf_score = score_from_mape(rf_comb) if rf_comb is not None else None
+    if rf_score is not None:
+        scores.append(rf_score)
+        components["rf_score"] = rf_score
+
+    # 3) NN model
+    nn_mape = in_sample_stats.get("nn_mape")
+    nn_hist = memory_mape.get("nn")
+    nn_comb = None
+    if nn_mape is not None and nn_hist is not None:
+        nn_comb = (nn_mape * 0.5 + nn_hist * 0.5)
+    elif nn_mape is not None:
+        nn_comb = nn_mape
+    elif nn_hist is not None:
+        nn_comb = nn_hist
+    nn_score = score_from_mape(nn_comb) if nn_comb is not None else None
+    if nn_score is not None:
+        scores.append(nn_score)
+        components["nn_score"] = nn_score
+
+    if not scores:
+        # no stats, fallback low confidence
+        base_conf = 4.0
+    else:
+        base_conf = sum(scores) / len(scores)
+
+    # 4) Ensemble agreement
+    preds = [p for p in eng_results.values() if p is not None]
+    if len(preds) >= 2 and last_close is not None:
+        hi = max(preds)
+        lo = min(preds)
+        spread_pct = (hi - lo) / last_close * 100 if last_close != 0 else 0
+        if spread_pct < 2:
+            agreement_bonus = 2.0
+        elif spread_pct < 5:
+            agreement_bonus = 1.0
+        elif spread_pct < 10:
+            agreement_bonus = 0.0
+        else:
+            agreement_bonus = -1.5
+    else:
+        agreement_bonus = 0.0
+
+    components["agreement_bonus"] = agreement_bonus
+    conf = base_conf + agreement_bonus
+    conf = max(0.0, min(10.0, conf))
+    components["base_conf"] = base_conf
+    components["final_conf"] = conf
+    return conf, components
+
+
+# ======================================================
+# FORECAST WRAPPER
+# ======================================================
+
+def run_forecast_workflow():
+    print("\n=== Forecast Mode (Technical + ML + NN) ===\n")
+    ticker = input("Ticker (e.g. AAPL): ").strip().upper()
+    if not ticker:
+        print("No ticker given.")
+        return
+
+    period_choice = input("Period (hour/day/week) [day]: ").strip().lower() or "day"
+    horizon_str = input("Horizon in bars (e.g. 1 = 1 day if period=day): ").strip()
+    try:
+        horizon_bars = int(horizon_str)
+        if horizon_bars <= 0:
+            raise ValueError()
+    except Exception:
+        print("Invalid horizon.")
+        return
+
+    df = fetch_history(ticker, period_choice)
+    if df is None or df.empty:
+        print("No data fetched.")
+        return
+
+    last_close = float(df["Close"].iloc[-1])
+
+    # Update memory + get historical MAPE
+    memory_mape = update_memory_accuracy_for_ticker(ticker)
+
+    # === A) Technical
+    tech_res = technical_projection(df, horizon_bars, period_choice)
+    if "error" in tech_res:
+        print("Technical predictor error:", tech_res["error"])
+        return
+
+    tech_price = tech_res["predicted_price"]
+    tech_mape = tech_res.get("backtest_mape")
+
+    # === B) ML RandomForest
+    X, y = build_feature_matrix(df, horizon_bars)
+    rf_price = None
+    rf_stats = {}
+    if X is not None and y is not None:
+        rf_price, rf_stats = ml_random_forest_predict(X, y)
+
+    # === C) NN (LSTM / MLP)
+    nn_price = None
+    nn_stats = {}
+    if X is not None and y is not None:
+        nn_price, nn_stats = nn_lstm_predict(X, y, use_gpu=True)
+
+    # Build stats dictionaries
+    in_sample_stats = {
+        "technical_mape": tech_mape,
+        "rf_mape": rf_stats.get("mape"),
+        "nn_mape": nn_stats.get("mape")  # may be None; LSTM path doesn't compute MAPE
+    }
+
+    eng_results = {
+        "technical": tech_price,
+        "rf": rf_price,
+        "nn": nn_price
+    }
+
+    # Compute confidence
+    conf, conf_details = compute_confidence(eng_results, in_sample_stats, memory_mape, last_close)
+
+    print("\n=== Prediction Confidence ===")
+    print(f"Overall confidence rating: {conf:.2f} / 10")
+
+    print("\nBreakdown:")
+    for k, v in conf_details.items():
+        print(f"- {k}: {v}")
+    print()
+
+    # Only show predictions if confidence >= 7
+    if conf < 7.0:
+        print("⚠ Confidence below 7/10. Refusing to output price targets.\n")
+        return
+
+    # If we reached here, we can print forecasts.
+    print("✅ Confidence ≥ 7/10. Showing predictions:\n")
+
+    print("--- Engine A: Technical Model ---")
+    print(f"Predicted price: {tech_price:.4f}")
+    print(f"Implied move: {tech_res['expected_pct']:.3f}% from last close {last_close:.4f}")
+    print(f"Backtest MAPE (technical): {tech_mape:.2f}% \n" if tech_mape is not None else "Backtest MAPE not available.\n")
+
+    print("How technical result was derived:")
+    for k, v in tech_res["explanation"].items():
+        if isinstance(v, list):
+            for line in v:
+                print("  *", line)
+        else:
+            print(f"  {k}: {v}")
+    print()
+
+    print("--- Engine B: RandomForest ML ---")
+    if rf_price is not None:
+        print(f"Predicted price: {rf_price:.4f}")
+        if rf_stats.get("mape") is not None:
+            print(f"RF in-sample MAPE: {rf_stats['mape']:.2f}%")
+        if rf_stats.get("r2") is not None:
+            print(f"RF R²: {rf_stats['r2']:.3f}")
+    else:
+        print("RF prediction unavailable.")
+    print()
+
+    print("--- Engine C: Neural Network (LSTM / MLP) ---")
+    if nn_price is not None:
+        print(f"Predicted price: {nn_price:.4f}")
+        print(f"NN meta: {nn_stats}")
+    else:
+        print("NN prediction unavailable.")
+    print()
+
+    # Blended prediction
+    preds = [p for p in [tech_price, rf_price, nn_price] if p is not None]
+    if preds:
+        blended = sum(preds) / len(preds)
+        print(f"Blended ensemble prediction: {blended:.4f}")
+    else:
+        blended = None
+
+    # Store predictions in memory for future learning
+    # approximate target time: last index + horizon_bars * bar_duration
+    try:
+        last_idx = df.index[-1]
+        if period_choice == "hour":
+            target_time = (last_idx.to_pydatetime() + timedelta(hours=horizon_bars)).isoformat()
+        elif period_choice == "week":
+            target_time = (last_idx.to_pydatetime() + timedelta(weeks=horizon_bars)).isoformat()
+        else:
+            target_time = (last_idx.to_pydatetime() + timedelta(days=horizon_bars)).isoformat()
+    except Exception:
+        target_time = (datetime.now() + timedelta(days=horizon_bars)).isoformat()
+
+    # log each engine separately
+    append_prediction_record(ticker, period_choice, horizon_bars, "technical", tech_price, last_close, target_time)
+    if rf_price is not None:
+        append_prediction_record(ticker, period_choice, horizon_bars, "rf", rf_price, last_close, target_time)
+    if nn_price is not None:
+        append_prediction_record(ticker, period_choice, horizon_bars, "nn", nn_price, last_close, target_time)
+
+    print("\nPredictions stored to memory for future accuracy evaluation.\n")
+    input("Press Enter to return to menu...")
+
+
+# ======================================================
+# SMA REPORT + TABLE (MEDIUM SIZE)
+# ======================================================
+
+def run_sma_report():
+    print("\n=== SMA 20 + 50 Report (Medium Table) ===\n")
+    ticker = input("Ticker: ").strip().upper()
+    if not ticker:
+        print("No ticker given.")
+        return
+
+    period_choice = input("Period (hour/day/week) [day]: ").strip().lower() or "day"
+    df = fetch_history(ticker, period_choice, bars_back=120)
+    if df is None or df.empty:
+        print("No data.")
+        return
+
+    df = compute_indicators(df)
+    rows = df.tail(20)
+
+    from tabulate import tabulate
+    table = []
+    for idx, r in rows.iterrows():
+        table.append([
+            str(idx),
+            round(float(r["Close"]), 4),
+            round(float(r["SMA20"]), 4) if not pd.isna(r["SMA20"]) else "N/A",
+            round(float(r["SMA50"]), 4) if not pd.isna(r["SMA50"]) else "N/A",
+            f"{r.get('Pct_Change', 0):.2f}",
+            f"{r.get('RSI14', 0):.2f}",
+            f"{r.get('Dist_SMA20', 0):.2f}",
+            f"{r.get('Dist_SMA50', 0):.2f}",
+        ])
+
+    headers = ["Date", "Close", "SMA20", "SMA50", "%chg", "RSI14", "DistSMA20%", "DistSMA50%"]
+    print(tabulate(table, headers=headers, tablefmt="fancy_grid"))
+
+    support, resistance = compute_simple_support_resistance(df)
+    print(f"\nApprox Support: {support}, Resistance: {resistance}\n")
+    input("Press Enter to return to menu...")
+
+
+# ======================================================
+# PLOT + CSV + HELP
+# ======================================================
+
+def run_plot():
+    print("\n=== Plot Price + SMA ===\n")
+    plt = safe_import("matplotlib.pyplot")
+    if plt is None:
+        print("Matplotlib not available.")
+        return
+
+    ticker = input("Ticker: ").strip().upper()
+    period_choice = input("Period (hour/day/week) [day]: ").strip().lower() or "day"
+    df = fetch_history(ticker, period_choice, bars_back=300)
+    if df is None or df.empty:
+        print("No data.")
+        return
+
+    df = compute_indicators(df)
+    plt.figure(figsize=(10, 5))
+    plt.plot(df.index, df["Close"], label="Close")
+    plt.plot(df.index, df["SMA20"], label="SMA20")
+    plt.plot(df.index, df["SMA50"], label="SMA50")
+    plt.legend()
+    plt.title(f"{ticker} - Price with SMA")
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
+
+
+def run_csv_download():
+    print("\n=== Download Historical CSV ===\n")
+    ticker = input("Ticker: ").strip().upper()
+    if not ticker:
+        print("No ticker.")
+        return
+    period_choice = input("Period (hour/day/week) [day]: ").strip().lower() or "day"
+    df = fetch_history(ticker, period_choice, bars_back=2000)
+    if df is None or df.empty:
+        print("No data.")
+        return
+
+    out_path = os.path.join(BASE_DIR, f"{ticker}_{period_choice}_history.csv")
+    df.to_csv(out_path)
+    print(f"Saved: {out_path}")
+    input("Press Enter to return to menu...")
+
+
+def run_help():
+    print("""
+=== HELP / GLOSSARY (USED TERMS) ===
+
+This tool:
+- Downloads historical market data from Yahoo Finance (via yfinance).
+- Computes technical indicators with pandas/pandas_ta/ta when available.
+- Runs three prediction engines:
+  A) Technical rule-based model using trend, volatility, RSI, MACD, distance from SMAs.
+  B) RandomForest regression model (scikit-learn).
+  C) Neural Network model (PyTorch LSTM if possible, else sklearn MLP).
+
+Indicators:
+- SMA20, SMA50, SMA200: Simple moving average over 20/50/200 bars.
+- EMA12, EMA26: Exponential moving averages.
+- RSI14: Relative Strength Index over 14 bars; >70 overbought, <30 oversold.
+- MACD: Trend momentum (difference between EMAs) with signal line & histogram.
+- ATR14: Average True Range (volatility).
+- OBV: On-Balance Volume (volume-based trend).
+- Dist_SMA20/50: % distance from respective SMA (mean reversion signal).
+- Volatility20: Standard deviation of close over 20 bars.
+
+Confidence:
+- Combines backtested error (MAPE), historical real-world error from memory,
+  and agreement between engines (technical, RF, NN).
+- Only if confidence >= 7/10 will price targets be shown.
+
+Memory:
+- Predictions are stored in ./memory/predictions_log.csv.
+- On each run, the tool checks old predictions whose target time has passed,
+  fetches actual prices, and updates error metrics to learn over time.
+
+""")
+    input("Press Enter to return to menu...")
+
+
+# ======================================================
+# MAIN MENU
+# ======================================================
+
+def main_menu():
+    while True:
+        print("""
+=== Stock Analyzer V4 - Predictive ===
+
+1. SMA 20 + 50 Report (Medium)
+2. Plot Price + SMA
+3. Download Historical CSV
+4. Forecast (Technical + ML + NN)
+5. Help
+6. Exit
+""")
+        choice = input("Choice: ").strip()
+        if choice == "1":
+            run_sma_report()
+        elif choice == "2":
+            run_plot()
+        elif choice == "3":
+            run_csv_download()
+        elif choice == "4":
+            run_forecast_workflow()
+        elif choice == "5":
+            run_help()
+        elif choice == "6":
+            print("Goodbye.")
+            break
+        else:
+            print("Invalid choice.\n")
+
+
+# ======================================================
+# ENTRYPOINT
+# ======================================================
+
+def main():
+    bootstrap()
+    main_menu()
+
+
+if __name__ == "__main__":
+    main()
