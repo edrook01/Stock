@@ -306,17 +306,8 @@ def fetch_history(ticker: str, period_choice: str, bars_back: int = 300):
     period_choice = period_choice.lower()
     period, interval = INTERVAL_MAP.get(period_choice, INTERVAL_MAP["day"])
 
-    session = None
-    if requests_mod is not None:
-        try:
-            session = requests_mod.Session()
-            session.headers.update({"User-Agent": f"StockAnalyzer/{VERSION}"})
-            session.params = {"_": datetime.utcnow().timestamp()}
-        except Exception:
-            session = None
-
     try:
-        ticker_client = yfinance.Ticker(ticker, session=session) if session else yfinance.Ticker(ticker)
+        ticker_client = yfinance.Ticker(ticker)
         data = ticker_client.history(period=period, interval=interval)
         if data is None or data.empty:
             return None
@@ -326,12 +317,6 @@ def fetch_history(ticker: str, period_choice: str, bars_back: int = 300):
     except Exception as exc:
         log(f"Failed to fetch data for {ticker}: {exc}")
         return None
-    finally:
-        if session is not None:
-            try:
-                session.close()
-            except Exception:
-                pass
 
 
 def compute_indicators(df):  # type: ignore[override]
