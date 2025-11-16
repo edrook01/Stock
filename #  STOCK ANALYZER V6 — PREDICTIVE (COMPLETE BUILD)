@@ -1168,59 +1168,76 @@ def run_forecast_workflow(
     maybe_pause(pause)
 
 
-def run_training_workflow(pause: bool = True) -> None:
-    print("\n=== Training / Self-Evaluation ===\n")
-    ensure_memory_file()
-    try:
-        df = pd.read_csv(MEM_FILE)
-    except Exception as exc:
-        print(f"Could not load memory file: {exc}")
-        maybe_pause(pause)
-        return
+def run_training_workflow(pause: bool = True, loop: bool = False) -> None:
+    def execute_training_pass() -> None:
+        print("\n=== Training / Self-Evaluation ===\n")
+        ensure_memory_file()
+        try:
+            df = pd.read_csv(MEM_FILE)
+        except Exception as exc:
+            print(f"Could not load memory file: {exc}")
+            return
 
-    if df.empty:
-        print("No prediction history found. Run forecasts to generate training data.")
-        maybe_pause(pause)
-        return
+        if df.empty:
+            print("No prediction history found. Run forecasts to generate training data.")
+            return
 
-    tickers = sorted(df["ticker"].dropna().unique())
-    completed = int(df["actual_price"].notna().sum())
-    pending = int(len(df) - completed)
+        tickers = sorted(df["ticker"].dropna().unique())
+        completed = int(df["actual_price"].notna().sum())
+        pending = int(len(df) - completed)
 
-    print(
-        "Found {rows} prediction records across {tickers} tracked tickers.".format(
-            rows=len(df), tickers=len(tickers)
+        print(
+            "Found {rows} prediction records across {tickers} tracked tickers.".format(
+                rows=len(df), tickers=len(tickers)
+            )
         )
-    )
-    print(f"Completed predictions with actual prices: {completed}")
-    print(f"Pending predictions awaiting actual prices: {pending}")
+        print(f"Completed predictions with actual prices: {completed}")
+        print(f"Pending predictions awaiting actual prices: {pending}")
 
-    per_ticker_accuracy: Dict[str, Dict[str, float]] = {}
-    global_accuracy: Dict[str, List[float]] = {}
+        per_ticker_accuracy: Dict[str, Dict[str, float]] = {}
+        global_accuracy: Dict[str, List[float]] = {}
 
-    for ticker in tickers:
-        accuracy = update_memory_accuracy_for_ticker(ticker)
-        if not accuracy:
+        for ticker in tickers:
+            accuracy = update_memory_accuracy_for_ticker(ticker)
+            if not accuracy:
+                continue
+            per_ticker_accuracy[ticker] = accuracy
+            for engine, mape in accuracy.items():
+                global_accuracy.setdefault(engine, []).append(mape)
+
+        if per_ticker_accuracy:
+            print("\nUpdated MAPE (by ticker and engine):")
+            for ticker, scores in per_ticker_accuracy.items():
+                parts = ", ".join(f"{engine}: {mape:.2f}%" for engine, mape in scores.items())
+                print(f"  - {ticker}: {parts}")
+        else:
+            print("\nNo tickers have evaluable targets yet; waiting for target times to elapse.")
+
+        if global_accuracy:
+            print("\nAverage MAPE across all tracked tickers:")
+            for engine, values in global_accuracy.items():
+                avg_mape = sum(values) / len(values)
+                print(f"  - {engine}: {avg_mape:.2f}% (n={len(values)})")
+
+    while True:
+        execute_training_pass()
+        if pause and not loop:
+            maybe_pause(True)
+        if not loop:
+            return
+
+        print(
+            "\nTraining loop controls: [Enter] rerun training, [P] forecast now, [M] return to menu, [Q] quit"
+        )
+        selection = input("Selection: ").strip().lower()
+        if selection in {"m", "menu"}:
+            break
+        if selection in {"q", "quit"}:
+            sys.exit(0)
+        if selection in {"p", "predict", "forecast"}:
+            run_forecast_workflow(pause=False)
             continue
-        per_ticker_accuracy[ticker] = accuracy
-        for engine, mape in accuracy.items():
-            global_accuracy.setdefault(engine, []).append(mape)
-
-    if per_ticker_accuracy:
-        print("\nUpdated MAPE (by ticker and engine):")
-        for ticker, scores in per_ticker_accuracy.items():
-            parts = ", ".join(f"{engine}: {mape:.2f}%" for engine, mape in scores.items())
-            print(f"  - {ticker}: {parts}")
-    else:
-        print("\nNo tickers have evaluable targets yet; waiting for target times to elapse.")
-
-    if global_accuracy:
-        print("\nAverage MAPE across all tracked tickers:")
-        for engine, values in global_accuracy.items():
-            avg_mape = sum(values) / len(values)
-            print(f"  - {engine}: {avg_mape:.2f}% (n={len(values)})")
-
-    maybe_pause(pause)
+        # Any other input (including Enter) simply reruns the training pass
 
 
 def run_help(pause: bool = True) -> None:
@@ -1344,7 +1361,7 @@ def main_menu():
         elif choice == "4":
             run_forecast_workflow()
         elif choice == "5":
-            run_training_workflow()
+            run_training_workflow(loop=True)
         elif choice == "6":
             run_help()
         elif choice == "7":
