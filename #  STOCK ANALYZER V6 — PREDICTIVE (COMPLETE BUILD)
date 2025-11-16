@@ -56,6 +56,33 @@ def log(msg: str) -> None:
     print(f"[{ts}] {msg}")
 
 
+def divider(char: str = "─", width: int = 70) -> str:
+    return char * width
+
+
+def print_panel(title: str, lines: Iterable[str]) -> None:
+    border = divider()
+    print(border)
+    print(f"{title}")
+    print(border)
+    for line in lines:
+        print(f"• {line}")
+    print(border)
+
+
+def guided_prompt(
+    label: str,
+    expectation: str,
+    example: str,
+    default: Optional[str] = None,
+) -> str:
+    default_hint = f" [default: {default}]" if default else ""
+    print(
+        f"\n{divider()}\n{label}{default_hint}\n- Expected: {expectation}\n- Example:  {example}\n{divider()}"
+    )
+    return prompt(f"{label}{default_hint}: ", default)
+
+
 def install_packages_local() -> None:
     log("Checking dependencies...")
     for import_name, (pip_name, version) in PACKAGE_SPECS.items():
@@ -622,11 +649,26 @@ def run_sma_report(
     pause: bool = True,
 ) -> None:
     print("\n=== SMA 20 + 50 Report ===\n")
-    ticker = (ticker or prompt("Ticker symbol: ")).strip().upper()
+    ticker = (
+        ticker
+        or guided_prompt(
+            "Ticker symbol",
+            "Use a single stock/ETF ticker in uppercase letters.",
+            "AAPL",
+        )
+    ).strip().upper()
     if not ticker:
         print("Ticker required.")
         return
-    period_choice = (period_choice or prompt("Period (hour/day/week) [day]: ", "day")).strip().lower() or "day"
+    period_choice = (
+        period_choice
+        or guided_prompt(
+            "Period",
+            "Choose one of: hour, day, or week to set candle duration.",
+            "day",
+            "day",
+        )
+    ).strip().lower() or "day"
     df = fetch_history(ticker, period_choice, bars_back=400)
     if df is None or df.empty:
         print("No data downloaded.")
@@ -661,8 +703,23 @@ def run_plot(
     if plt_mod is None:
         print("Matplotlib not installed.")
         return
-    ticker = (ticker or prompt("Ticker symbol: ")).strip().upper()
-    period_choice = (period_choice or prompt("Period (hour/day/week) [day]: ", "day")).strip().lower() or "day"
+    ticker = (
+        ticker
+        or guided_prompt(
+            "Ticker symbol",
+            "Provide a single ticker in uppercase letters for plotting.",
+            "MSFT",
+        )
+    ).strip().upper()
+    period_choice = (
+        period_choice
+        or guided_prompt(
+            "Period",
+            "Select hour, day, or week to match your plotting cadence.",
+            "week",
+            "day",
+        )
+    ).strip().lower() or "day"
     df = fetch_history(ticker, period_choice, bars_back=bars_back or 300)
     if df is None or df.empty:
         print("No data downloaded.")
@@ -691,11 +748,26 @@ def run_csv_download(
     pause: bool = True,
 ) -> None:
     print("\n=== Download Historical CSV ===\n")
-    ticker = (ticker or prompt("Ticker symbol: ")).strip().upper()
+    ticker = (
+        ticker
+        or guided_prompt(
+            "Ticker symbol",
+            "Enter one uppercase ticker to export its history.",
+            "SPY",
+        )
+    ).strip().upper()
     if not ticker:
         print("Ticker required.")
         return
-    period_choice = (period_choice or prompt("Period (hour/day/week) [day]: ", "day")).strip().lower() or "day"
+    period_choice = (
+        period_choice
+        or guided_prompt(
+            "Period",
+            "Pick hour, day, or week candles for the CSV output.",
+            "hour",
+            "day",
+        )
+    ).strip().lower() or "day"
     df = fetch_history(ticker, period_choice, bars_back=bars_override or 2000)
     if df is None or df.empty:
         print("No data downloaded.")
@@ -713,12 +785,39 @@ def run_forecast_workflow(
     pause: bool = True,
 ) -> None:
     print("\n=== Forecast (Technical + ML + NN) ===\n")
-    ticker = (ticker or prompt("Ticker symbol: ")).strip().upper()
+    ticker = (
+        ticker
+        or guided_prompt(
+            "Ticker symbol",
+            "Specify one uppercase ticker to run the combined forecast.",
+            "NVDA",
+        )
+    ).strip().upper()
     if not ticker:
         print("Ticker required.")
         return
-    period_choice = (period_choice or prompt("Period (hour/day/week) [day]: ", "day")).strip().lower() or "day"
-    horizon = horizon if horizon is not None else safe_int(prompt("Forecast horizon in bars [5]: ", "5"), 5)
+    period_choice = (
+        period_choice
+        or guided_prompt(
+            "Period",
+            "Choose the candle size: hour, day, or week.",
+            "hour",
+            "day",
+        )
+    ).strip().lower() or "day"
+    horizon = (
+        horizon
+        if horizon is not None
+        else safe_int(
+            guided_prompt(
+                "Forecast horizon in bars",
+                "Enter a positive integer showing how many candles to project.",
+                "5",
+                "5",
+            ),
+            5,
+        )
+    )
     horizon = max(1, horizon)
     df = fetch_history(ticker, period_choice, bars_back=600)
     if df is None or df.empty:
@@ -837,18 +936,22 @@ def run_diagnostics(pause: bool = True) -> None:
 def main_menu():
     while True:
         print(
-            f"""
-=== Stock Analyzer {VERSION} ===
-1. SMA 20 + 50 Report
-2. Plot Price + SMA
-3. Download Historical CSV
-4. Forecast (Technical + ML + NN)
-5. Help
-6. Diagnostics
-7. Exit
-"""
+            f"\n{divider('=')}\nStock Analyzer {VERSION} — Main Menu\n{divider('-')}"
         )
-        choice = input("Choice: ").strip()
+        print_panel(
+            "Select the workflow you want to run:",
+            [
+                "1 → SMA 20 + 50 snapshot with current indicators",
+                "2 → Plot price with SMA overlays (save or display)",
+                "3 → Download historical candles as a CSV export",
+                "4 → Forecast price movement (technical + ML + NN)",
+                "5 → Help and usage guidance",
+                "6 → Diagnostics and environment checks",
+                "7 → Exit the analyzer",
+            ],
+        )
+        print("Enter the menu number (1-7) as a single digit.")
+        choice = input("Choice [1-7]: ").strip()
         if choice == "1":
             run_sma_report()
         elif choice == "2":
