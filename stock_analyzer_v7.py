@@ -72,6 +72,11 @@ def print_panel(title: str, lines: Iterable[str]) -> None:
     print(border)
 
 
+def clear_screen() -> None:
+    command = "cls" if os.name == "nt" else "clear"
+    os.system(command)
+
+
 def guided_prompt(
     label: str,
     expectation: str,
@@ -155,6 +160,7 @@ def bootstrap() -> None:
         sys.exit(1)
 
     log("Bootstrap complete.\n")
+    clear_screen()
 
 
 # =============================================================
@@ -191,6 +197,11 @@ def maybe_pause(pause: bool, message: str = "Press Enter to return to the menu..
         input(message)
     except EOFError:
         pass
+
+
+def finalize_section(pause: bool) -> None:
+    maybe_pause(pause)
+    clear_screen()
 
 
 def ensure_memory_file() -> None:
@@ -1089,112 +1100,114 @@ def run_forecast_workflow(
     band: Optional[float] = None,
     pause: bool = True,
 ) -> None:
-    print("\n=== Forecast (Technical + ML + NN) ===\n")
-    ticker = (
-        ticker
-        or guided_prompt(
-            "Ticker symbol",
-            "Specify one uppercase ticker to run the combined forecast.",
-            "NVDA",
+    try:
+        print("\n=== Forecast (Technical + ML + NN) ===\n")
+        ticker = (
+            ticker
+            or guided_prompt(
+                "Ticker symbol",
+                "Specify one uppercase ticker to run the combined forecast.",
+                "NVDA",
+            )
+        ).strip().upper()
+        if not ticker:
+            print("Ticker required.")
+            return
+        period_choice = (
+            period_choice
+            or guided_prompt(
+                "Period",
+                "Choose the candle size: hour, day, or week.",
+                "hour",
+                "day",
+            )
+        ).strip().lower() or "day"
+        horizon = (
+            horizon
+            if horizon is not None
+            else safe_int(
+                guided_prompt(
+                    "Forecast horizon in bars",
+                    "Enter a positive integer showing how many candles to project.",
+                    "5",
+                    "5",
+                ),
+                5,
+            )
         )
-    ).strip().upper()
-    if not ticker:
-        print("Ticker required.")
-        return
-    period_choice = (
-        period_choice
-        or guided_prompt(
-            "Period",
-            "Choose the candle size: hour, day, or week.",
-            "hour",
-            "day",
+        horizon = max(1, horizon)
+        band = (
+            band
+            if band is not None
+            else safe_float(
+                guided_prompt(
+                    "+/- band for probability (%)",
+                    "Set the percentage band to estimate hit probability around each target.",
+                    f"{DEFAULT_BAND_PERCENT:.1f}",
+                    f"{DEFAULT_BAND_PERCENT:.1f}",
+                ),
+                DEFAULT_BAND_PERCENT,
+            )
         )
-    ).strip().lower() or "day"
-    horizon = (
-        horizon
-        if horizon is not None
-        else safe_int(
-            guided_prompt(
-                "Forecast horizon in bars",
-                "Enter a positive integer showing how many candles to project.",
-                "5",
-                "5",
-            ),
-            5,
-        )
-    )
-    horizon = max(1, horizon)
-    band = (
-        band
-        if band is not None
-        else safe_float(
-            guided_prompt(
-                "+/- band for probability (%)",
-                "Set the percentage band to estimate hit probability around each target.",
-                f"{DEFAULT_BAND_PERCENT:.1f}",
-                f"{DEFAULT_BAND_PERCENT:.1f}",
-            ),
-            DEFAULT_BAND_PERCENT,
-        )
-    )
-    band = max(0.5, band)
-    df = fetch_history(ticker, period_choice, bars_back=600)
-    if df is None or df.empty:
-        print("No data downloaded.")
-        return
+        band = max(0.5, band)
+        df = fetch_history(ticker, period_choice, bars_back=600)
+        if df is None or df.empty:
+            print("No data downloaded.")
+            return
 
-    df = compute_indicators(df)
-    last_close = float(df["Close"].iloc[-1])
-    horizon_days = max(1, math.ceil(horizon / 6)) if period_choice == "hour" else max(1, horizon)
-    news_context = collect_news_context(ticker, horizon_days=horizon_days)
-    history_accuracy = update_memory_accuracy_for_ticker(ticker)
-    if history_accuracy:
-        print("Historical MAPE by engine (lower is better):")
-        for engine, mape in history_accuracy.items():
-            print(f"  - {engine}: {mape:.2f}%")
+        df = compute_indicators(df)
+        last_close = float(df["Close"].iloc[-1])
+        horizon_days = max(1, math.ceil(horizon / 6)) if period_choice == "hour" else max(1, horizon)
+        news_context = collect_news_context(ticker, horizon_days=horizon_days)
+        history_accuracy = update_memory_accuracy_for_ticker(ticker)
+        if history_accuracy:
+            print("Historical MAPE by engine (lower is better):")
+            for engine, mape in history_accuracy.items():
+                print(f"  - {engine}: {mape:.2f}%")
+            print()
+
+        results = consolidate_predictions(
+            ticker,
+            period_choice,
+            horizon,
+            df,
+            filter(
+                None,
+                [
+                    technical_engine(df),
+                    analyst_consensus_engine(ticker, last_close),
+                    random_forest_engine(df),
+                    neural_network_engine(df),
+                    news_sentiment_engine(ticker, df, news_context),
+                ],
+            ),
+            band_percent=band,
+        )
+
+        if not results:
+            print("No engine produced a forecast.")
+            return
+
+        print(format_prediction_table(results, last_close))
+        print(
+            f"Probabilities reflect the chance of landing within ±{band:.1f}% of each target using recent volatility."
+        )
         print()
-
-    results = consolidate_predictions(
-        ticker,
-        period_choice,
-        horizon,
-        df,
-        filter(
-            None,
-            [
-                technical_engine(df),
-                analyst_consensus_engine(ticker, last_close),
-                random_forest_engine(df),
-                neural_network_engine(df),
-                news_sentiment_engine(ticker, df, news_context),
-            ],
-        ),
-        band_percent=band,
-    )
-
-    if not results:
-        print("No engine produced a forecast.")
-        return
-
-    print(format_prediction_table(results, last_close))
-    print(
-        f"Probabilities reflect the chance of landing within ±{band:.1f}% of each target using recent volatility."
-    )
-    print()
-    sources = news_context.get("sources", []) if isinstance(news_context, dict) else []
-    if sources:
-        print("News sources factored into the forecast:")
-        for src in sources:
-            published = src.get("published")
-            ts = published.strftime("%Y-%m-%d %H:%M") if hasattr(published, "strftime") else "n/a"
-            sentiment_note = f"sentiment {src.get('sentiment', 0):+d}"
-            link = src.get("link") or ""
-            link_note = f" → {link}" if link else ""
-            print(f"  - {src.get('publisher', 'unknown')} ({ts}): {src.get('title', '').strip()} [{sentiment_note}]{link_note}")
-    else:
-        print("No recent headlines were available for news weighting.")
-    print()
-    maybe_pause(pause)
+        sources = news_context.get("sources", []) if isinstance(news_context, dict) else []
+        if sources:
+            print("News sources factored into the forecast:")
+            for src in sources:
+                published = src.get("published")
+                ts = published.strftime("%Y-%m-%d %H:%M") if hasattr(published, "strftime") else "n/a"
+                sentiment_note = f"sentiment {src.get('sentiment', 0):+d}"
+                link = src.get("link") or ""
+                link_note = f" → {link}" if link else ""
+                print(f"  - {src.get('publisher', 'unknown')} ({ts}): {src.get('title', '').strip()} [{sentiment_note}]{link_note}")
+        else:
+            print("No recent headlines were available for news weighting.")
+        print()
+    finally:
+        finalize_section(pause)
 
 
 def run_training_workflow(pause: bool = True, loop: bool = False) -> None:
@@ -1248,25 +1261,26 @@ def run_training_workflow(pause: bool = True, loop: bool = False) -> None:
                 avg_mape = sum(values) / len(values)
                 print(f"  - {engine}: {avg_mape:.2f}% (n={len(values)})")
 
-    while True:
-        execute_training_pass()
-        if pause and not loop:
-            maybe_pause(True)
-        if not loop:
-            return
+    try:
+        while True:
+            execute_training_pass()
+            if not loop:
+                break
 
-        print(
-            "\nTraining loop controls: [Enter] rerun training, [P] forecast now, [M] return to menu, [Q] quit"
-        )
-        selection = input("Selection: ").strip().lower()
-        if selection in {"m", "menu"}:
-            break
-        if selection in {"q", "quit"}:
-            sys.exit(0)
-        if selection in {"p", "predict", "forecast"}:
-            run_forecast_workflow(pause=False)
-            continue
-        # Any other input (including Enter) simply reruns the training pass
+            print(
+                "\nTraining loop controls: [Enter] rerun training, [P] forecast now, [M] return to menu, [Q] quit"
+            )
+            selection = input("Selection: ").strip().lower()
+            if selection in {"m", "menu"}:
+                break
+            if selection in {"q", "quit"}:
+                sys.exit(0)
+            if selection in {"p", "predict", "forecast"}:
+                run_forecast_workflow(pause=False)
+                continue
+            # Any other input (including Enter) simply reruns the training pass
+    finally:
+        finalize_section(pause and not loop)
 
 
 def run_help(pause: bool = True) -> None:
