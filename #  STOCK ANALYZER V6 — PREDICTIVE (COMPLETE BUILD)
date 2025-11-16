@@ -1028,6 +1028,61 @@ def run_forecast_workflow(
     maybe_pause(pause)
 
 
+def run_training_workflow(pause: bool = True) -> None:
+    print("\n=== Training / Self-Evaluation ===\n")
+    ensure_memory_file()
+    try:
+        df = pd.read_csv(MEM_FILE)
+    except Exception as exc:
+        print(f"Could not load memory file: {exc}")
+        maybe_pause(pause)
+        return
+
+    if df.empty:
+        print("No prediction history found. Run forecasts to generate training data.")
+        maybe_pause(pause)
+        return
+
+    tickers = sorted(df["ticker"].dropna().unique())
+    completed = int(df["actual_price"].notna().sum())
+    pending = int(len(df) - completed)
+
+    print(
+        "Found {rows} prediction records across {tickers} tracked tickers.".format(
+            rows=len(df), tickers=len(tickers)
+        )
+    )
+    print(f"Completed predictions with actual prices: {completed}")
+    print(f"Pending predictions awaiting actual prices: {pending}")
+
+    per_ticker_accuracy: Dict[str, Dict[str, float]] = {}
+    global_accuracy: Dict[str, List[float]] = {}
+
+    for ticker in tickers:
+        accuracy = update_memory_accuracy_for_ticker(ticker)
+        if not accuracy:
+            continue
+        per_ticker_accuracy[ticker] = accuracy
+        for engine, mape in accuracy.items():
+            global_accuracy.setdefault(engine, []).append(mape)
+
+    if per_ticker_accuracy:
+        print("\nUpdated MAPE (by ticker and engine):")
+        for ticker, scores in per_ticker_accuracy.items():
+            parts = ", ".join(f"{engine}: {mape:.2f}%" for engine, mape in scores.items())
+            print(f"  - {ticker}: {parts}")
+    else:
+        print("\nNo tickers have evaluable targets yet; waiting for target times to elapse.")
+
+    if global_accuracy:
+        print("\nAverage MAPE across all tracked tickers:")
+        for engine, values in global_accuracy.items():
+            avg_mape = sum(values) / len(values)
+            print(f"  - {engine}: {avg_mape:.2f}% (n={len(values)})")
+
+    maybe_pause(pause)
+
+
 def run_help(pause: bool = True) -> None:
     print(
         """
@@ -1128,13 +1183,14 @@ def main_menu():
                 "2 → Plot price with SMA overlays (save or display)",
                 "3 → Download historical candles as a CSV export",
                 "4 → Forecast price movement (technical + ML + NN)",
-                "5 → Help and usage guidance",
-                "6 → Diagnostics and environment checks",
-                "7 → Exit the analyzer",
+                "5 → Train from stored predictions for self-evaluation",
+                "6 → Help and usage guidance",
+                "7 → Diagnostics and environment checks",
+                "8 → Exit the analyzer",
             ],
         )
-        print("Enter the menu number (1-7) as a single digit.")
-        choice = input("Choice [1-7]: ").strip()
+        print("Enter the menu number (1-8) as a single digit.")
+        choice = input("Choice [1-8]: ").strip()
         if choice == "1":
             run_sma_report()
         elif choice == "2":
@@ -1144,10 +1200,12 @@ def main_menu():
         elif choice == "4":
             run_forecast_workflow()
         elif choice == "5":
-            run_help()
+            run_training_workflow()
         elif choice == "6":
-            run_diagnostics()
+            run_help()
         elif choice == "7":
+            run_diagnostics()
+        elif choice == "8":
             print("Goodbye!")
             break
         else:
@@ -1163,7 +1221,16 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Stock Analyzer V6")
     parser.add_argument(
         "--action",
-        choices=["menu", "sma", "plot", "csv", "forecast", "help", "diagnostics"],
+        choices=[
+            "menu",
+            "sma",
+            "plot",
+            "csv",
+            "forecast",
+            "train",
+            "help",
+            "diagnostics",
+        ],
         default="menu",
         help="Workflow to run (default: interactive menu)",
     )
@@ -1214,6 +1281,8 @@ def dispatch_cli_action(args) -> None:
             horizon=args.horizon,
             pause=False,
         )
+    elif action == "train":
+        run_training_workflow(pause=False)
     elif action == "help":
         run_help(pause=False)
     elif action == "diagnostics":
