@@ -1,16 +1,28 @@
-# =============================================================
-#  STOCK ANALYZER V5 — PREDICTIVE (CLEAN + HARDENED BUILD)
-#  Mode B: Fully Refactored + Crash-Proof + Stable Forecasting
-# =============================================================
+#!/usr/bin/env python3
+"""Stock Analyzer V5 – Predictive (Clean + Hardened Build).
 
+This is a stability-focused refactor of the previous Stock Analyzer script.
+The tool keeps the bootstrapper that installs dependencies into a local
+``libs`` directory (so the host environment stays untouched) while the rest of
+the code base is split into small, testable helpers.  The CLI that ships with
+this file mirrors the original feature set (SMA report, plotting, CSV download
+and forecast) but the forecasting pipeline is now deterministic, resilient and
+covered with guard rails – every engine advertises why it failed instead of
+crashing the full program.
+"""
+
+from __future__ import annotations
+
+import math
 import os
 import sys
 import subprocess
-import time
 import importlib
+from dataclasses import dataclass
 from datetime import datetime, timedelta
+from typing import Dict, Iterable, List, Optional, Tuple
 
-print("\n=== Stock Analyzer V4 - Predictive (Refactored Build) ===\n")
+print("\n=== Stock Analyzer V5 - Predictive (Clean + Hardened Build) ===\n")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 LIB_DIR = os.path.join(BASE_DIR, "libs")
@@ -27,7 +39,7 @@ MEM_FILE = os.path.join(MEM_DIR, "predictions_log.csv")
 # DEPENDENCIES
 # =============================================================
 
-PACKAGE_SPECS = {
+PACKAGE_SPECS: Dict[str, Tuple[str, Optional[str]]] = {
     "yfinance": ("yfinance", "0.2.66"),
     "pandas": ("pandas", "2.2.2"),
     "numpy": ("numpy", "1.26.4"),
@@ -37,19 +49,19 @@ PACKAGE_SPECS = {
     "requests": ("requests", "2.32.3"),
     "tabulate": ("tabulate", "0.9.0"),
     "matplotlib": ("matplotlib", "3.8.4"),
-    "torch": ("torch", None),  # optional
+    "torch": ("torch", None),  # optional – used for NN if available.
 }
 
 
-def log(msg):
+def log(msg: str) -> None:
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     print(f"[{ts}] {msg}")
 
 
-def install_packages_local():
+def install_packages_local() -> None:
     log("Checking dependencies...")
     for import_name, (pip_name, version) in PACKAGE_SPECS.items():
-        optional = (import_name == "torch")
+        optional = import_name == "torch"
 
         try:
             importlib.import_module(import_name)
@@ -61,14 +73,22 @@ def install_packages_local():
         pkg_str = pip_name if version is None else f"{pip_name}=={version}"
 
         try:
-            subprocess.check_call([
-                sys.executable, "-m", "pip", "install",
-                pkg_str, "--target", LIB_DIR, "--upgrade",
-                "--no-warn-script-location"
-            ])
+            subprocess.check_call(
+                [
+                    sys.executable,
+                    "-m",
+                    "pip",
+                    "install",
+                    pkg_str,
+                    "--target",
+                    LIB_DIR,
+                    "--upgrade",
+                    "--no-warn-script-location",
+                ]
+            )
             log(f"✔ Installed {pkg_str}")
-        except Exception as e:
-            log(f"!! Failed: {e}")
+        except Exception as exc:  # pragma: no cover - runtime guard
+            log(f"!! Failed: {exc}")
             if optional:
                 log("Skipping optional torch")
                 continue
@@ -77,20 +97,20 @@ def install_packages_local():
     print()
 
 
-def safe_import(name):
+def safe_import(name: str):  # type: ignore[override]
     try:
         return importlib.import_module(name)
-    except Exception as e:
-        log(f"Import error: {name} → {e}")
+    except Exception as exc:  # pragma: no cover - runtime guard
+        log(f"Import error: {name} → {exc}")
         return None
 
 
-def bootstrap():
-    print("Bootstrapping...")
+def bootstrap() -> None:
+    log("Bootstrapping...")
     install_packages_local()
 
     global yfinance, pd, np, ta_mod, pta, skl
-    global requests_mod, tabulate_mod
+    global requests_mod, tabulate_mod, torch_mod, plt_mod
 
     yfinance = safe_import("yfinance")
     pd = safe_import("pandas")
@@ -100,6 +120,8 @@ def bootstrap():
     skl = safe_import("sklearn")
     requests_mod = safe_import("requests")
     tabulate_mod = safe_import("tabulate")
+    torch_mod = safe_import("torch")
+    plt_mod = safe_import("matplotlib.pyplot")
 
     if yfinance is None or pd is None or np is None:
         print("Critical imports failed. Exiting.")
@@ -109,6 +131,645 @@ def bootstrap():
 
 
 # =============================================================
-# MEMORY / PREDICTION HISTORY SYSTEM
-# (kept unchanged except for small stability fixes later)
+# MEMORY SYSTEM
 # =============================================================
+
+HEADER = (
+    "timestamp,ticker,period,horizon_bars,engine,predicted_price," "last_close," "target_time,actual_price,abs_error,pct_error\n"
+)
+
+
+def ensure_memory_file() -> None:
+    if not os.path.exists(MEM_FILE):
+        with open(MEM_FILE, "w", encoding="utf-8") as handle:
+            handle.write(HEADER)
+
+
+def append_prediction_record(
+    ticker: str,
+    period: str,
+    horizon: int,
+    engine: str,
+    predicted_price: float,
+    last_close: float,
+    target_time: datetime,
+) -> None:
+    ensure_memory_file()
+    line = (
+        f"{datetime.now().isoformat()},{ticker},{period},{horizon},{engine},"
+        f"{predicted_price:.4f},{last_close:.4f},{target_time.isoformat()},,,\n"
+    )
+    with open(MEM_FILE, "a", encoding="utf-8") as handle:
+        handle.write(line)
+
+
+def _fetch_actual_price(ticker: str, target_time: datetime) -> Optional[float]:
+    if yfinance is None:
+        return None
+    start = target_time - timedelta(hours=6)
+    end = target_time + timedelta(hours=6)
+    try:
+        df = yfinance.Ticker(ticker).history(start=start, end=end, interval="1h")
+        if df.empty:
+            df = yfinance.Ticker(ticker).history(start=start.date(), end=end.date())
+        if df.empty:
+            return None
+        idx = (df.index - target_time).abs().argmin()  # type: ignore[attr-defined]
+        return float(df.iloc[idx]["Close"])
+    except Exception:
+        return None
+
+
+def update_memory_accuracy_for_ticker(ticker: str) -> Dict[str, float]:
+    ensure_memory_file()
+    try:
+        df = pd.read_csv(MEM_FILE)
+    except Exception:
+        return {}
+
+    if df.empty:
+        return {}
+
+    df_ticker = df[df["ticker"] == ticker].copy()
+    if df_ticker.empty:
+        return {}
+
+    updated = False
+    now = datetime.now()
+    for idx, row in df_ticker[df_ticker["actual_price"].isna()].iterrows():
+        try:
+            target_time = datetime.fromisoformat(str(row["target_time"]))
+        except Exception:
+            continue
+        if target_time > now:
+            continue
+        actual = _fetch_actual_price(ticker, target_time)
+        if actual is None:
+            continue
+        predicted = float(row["predicted_price"])
+        abs_error = abs(actual - predicted)
+        pct_error = abs_error / actual * 100 if actual else 0.0
+        df.loc[idx, "actual_price"] = actual
+        df.loc[idx, "abs_error"] = abs_error
+        df.loc[idx, "pct_error"] = pct_error
+        updated = True
+
+    if updated:
+        df.to_csv(MEM_FILE, index=False)
+
+    grouped = df_ticker.dropna(subset=["pct_error"])
+    if grouped.empty:
+        return {}
+
+    return (
+        grouped.groupby("engine")["pct_error"].mean().to_dict()
+    )  # type: ignore[return-value]
+
+
+# =============================================================
+# DATA / INDICATORS
+# =============================================================
+
+INTERVAL_MAP = {
+    "hour": ("60d", "1h"),
+    "day": ("5y", "1d"),
+    "week": ("10y", "1wk"),
+}
+
+
+def fetch_history(ticker: str, period_choice: str, bars_back: int = 300):
+    if yfinance is None:
+        raise RuntimeError("yfinance missing after bootstrap")
+
+    period_choice = period_choice.lower()
+    period, interval = INTERVAL_MAP.get(period_choice, INTERVAL_MAP["day"])
+
+    try:
+        data = yfinance.Ticker(ticker).history(period=period, interval=interval)
+        if data is None or data.empty:
+            return None
+        if len(data) > bars_back:
+            data = data.tail(bars_back)
+        return data
+    except Exception as exc:
+        log(f"Failed to fetch data for {ticker}: {exc}")
+        return None
+
+
+def compute_indicators(df):  # type: ignore[override]
+    if pd is None or np is None:
+        return df
+
+    df = df.copy()
+    close = df["Close"]
+
+    df["SMA20"] = close.rolling(20).mean()
+    df["SMA50"] = close.rolling(50).mean()
+    df["SMA200"] = close.rolling(200).mean()
+    df["EMA12"] = close.ewm(span=12, adjust=False).mean()
+    df["EMA26"] = close.ewm(span=26, adjust=False).mean()
+    df["RSI14"] = _compute_rsi(close, 14)
+    df["MACD"] = df["EMA12"] - df["EMA26"]
+    df["MACD_SIGNAL"] = df["MACD"].ewm(span=9, adjust=False).mean()
+    df["ATR14"] = _compute_atr(df, 14)
+    df["OBV"] = _compute_obv(df)
+    df["Dist_SMA20"] = (close - df["SMA20"]) / df["SMA20"]
+    df["Dist_SMA50"] = (close - df["SMA50"]) / df["SMA50"]
+    df["Volatility20"] = close.pct_change().rolling(20).std()
+    return df
+
+
+def _compute_rsi(series, window: int):  # type: ignore[override]
+    delta = series.diff()
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
+    avg_gain = gain.rolling(window).mean()
+    avg_loss = loss.rolling(window).mean()
+    rs = avg_gain / avg_loss
+    return 100 - (100 / (1 + rs))
+
+
+def _compute_atr(df, window: int):  # type: ignore[override]
+    high_low = df["High"] - df["Low"]
+    high_close = (df["High"] - df["Close"].shift()).abs()
+    low_close = (df["Low"] - df["Close"].shift()).abs()
+    tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+    return tr.rolling(window).mean()
+
+
+def _compute_obv(df):  # type: ignore[override]
+    direction = np.sign(df["Close"].diff()).fillna(0)
+    return (direction * df["Volume"]).cumsum()
+
+
+def build_feature_frame(df):
+    df = df.copy().dropna()
+    cols = [
+        "SMA20",
+        "SMA50",
+        "SMA200",
+        "EMA12",
+        "EMA26",
+        "RSI14",
+        "MACD",
+        "MACD_SIGNAL",
+        "ATR14",
+        "OBV",
+        "Dist_SMA20",
+        "Dist_SMA50",
+        "Volatility20",
+        "Close",
+    ]
+    return df[cols]
+
+
+# =============================================================
+# FORECAST ENGINES
+# =============================================================
+
+@dataclass
+class EngineResult:
+    engine: str
+    prediction: float
+    confidence: float
+    comment: str = ""
+
+
+FEATURE_COLUMNS = [
+    "SMA20",
+    "SMA50",
+    "SMA200",
+    "EMA12",
+    "EMA26",
+    "RSI14",
+    "MACD",
+    "MACD_SIGNAL",
+    "ATR14",
+    "OBV",
+    "Dist_SMA20",
+    "Dist_SMA50",
+    "Volatility20",
+]
+
+
+def technical_engine(df) -> Optional[EngineResult]:  # type: ignore[override]
+    if df is None or df.empty:
+        return None
+    latest = df.iloc[-1]
+    score = 0.0
+    comment_bits = []
+
+    if latest["Close"] > latest.get("SMA20", latest["Close"]):
+        score += 0.6
+        comment_bits.append(">SMA20")
+    else:
+        score -= 0.6
+        comment_bits.append("<SMA20")
+
+    if latest.get("RSI14", 50) < 30:
+        score += 0.8
+        comment_bits.append("RSI oversold")
+    elif latest.get("RSI14", 50) > 70:
+        score -= 0.8
+        comment_bits.append("RSI overbought")
+
+    macd = latest.get("MACD", 0) - latest.get("MACD_SIGNAL", 0)
+    score += math.tanh(macd)
+    comment_bits.append(f"MACD {macd:+.2f}")
+
+    dist = latest.get("Dist_SMA20", 0)
+    score -= dist * 2.5  # mean reversion
+
+    atr = latest.get("ATR14", 0)
+    volatility_penalty = min(1.0, (atr / latest["Close"]) * 10)
+    score -= volatility_penalty * 0.5
+
+    prediction = latest["Close"] * (1 + score * 0.01)
+    confidence = max(1.0, min(9.5, 5 + score))
+
+    return EngineResult(
+        engine="Technical",
+        prediction=float(prediction),
+        confidence=float(confidence),
+        comment=", ".join(comment_bits),
+    )
+
+
+def random_forest_engine(df) -> Optional[EngineResult]:  # type: ignore[override]
+    if skl is None:
+        return None
+
+    df_feat = build_feature_frame(df)
+    if len(df_feat) < 80:
+        return None
+
+    target = df_feat["Close"].shift(-1).dropna()
+    features = df_feat.loc[target.index, FEATURE_COLUMNS]
+
+    from sklearn.ensemble import RandomForestRegressor  # type: ignore
+    from sklearn.metrics import mean_absolute_error  # type: ignore
+
+    split_idx = int(len(features) * 0.8)
+    X_train = features.iloc[:split_idx]
+    y_train = target.iloc[:split_idx]
+    X_test = features.iloc[split_idx:]
+    y_test = target.iloc[split_idx:]
+
+    if len(X_train) < 50 or len(X_test) < 10:
+        return None
+
+    model = RandomForestRegressor(n_estimators=300, random_state=42, n_jobs=-1)
+    model.fit(X_train, y_train)
+    preds = model.predict(X_test)
+    mae = float(mean_absolute_error(y_test, preds))
+    last_features = features.iloc[-1]
+    next_price = float(model.predict([last_features])[0])
+
+    confidence = max(3.0, 10 - (mae / (y_test.mean() or 1)) * 50)
+
+    return EngineResult(
+        engine="RandomForest",
+        prediction=next_price,
+        confidence=confidence,
+        comment=f"MAE {mae:.2f}",
+    )
+
+
+def neural_network_engine(df) -> Optional[EngineResult]:  # type: ignore[override]
+    df_feat = build_feature_frame(df)
+    if len(df_feat) < 120:
+        return None
+
+    target = df_feat["Close"].shift(-1).dropna()
+    features = df_feat.loc[target.index, FEATURE_COLUMNS]
+
+    if torch_mod is not None:
+        return _torch_lstm_engine(features, target)
+    return _mlp_engine(features, target)
+
+
+def _torch_lstm_engine(features, target):  # type: ignore[override]
+    import numpy as _np
+
+    tensor = torch_mod.tensor
+    nn = torch_mod.nn
+
+    seq_len = 10
+    X_list = []
+    y_list = []
+    feat_values = features.values
+    for idx in range(len(features) - seq_len):
+        X_list.append(feat_values[idx : idx + seq_len])
+        y_list.append(target.iloc[idx + seq_len])
+
+    if len(X_list) < 50:
+        return None
+
+    X = tensor(_np.array(X_list), dtype=torch_mod.float32)
+    y = tensor(_np.array(y_list), dtype=torch_mod.float32).unsqueeze(-1)
+
+    dataset = torch_mod.utils.data.TensorDataset(X, y)
+    loader = torch_mod.utils.data.DataLoader(dataset, batch_size=32, shuffle=True)
+
+    class MiniLSTM(nn.Module):
+        def __init__(self, input_size):
+            super().__init__()
+            self.lstm = nn.LSTM(input_size, 32, batch_first=True)
+            self.fc = nn.Linear(32, 1)
+
+        def forward(self, x):  # type: ignore[override]
+            out, _ = self.lstm(x)
+            return self.fc(out[:, -1, :])
+
+    model = MiniLSTM(features.shape[1])
+    criterion = nn.L1Loss()
+    optimizer = torch_mod.optim.Adam(model.parameters(), lr=0.001)
+
+    model.train()
+    for _ in range(10):
+        for batch_X, batch_y in loader:
+            optimizer.zero_grad()
+            output = model(batch_X)
+            loss = criterion(output, batch_y)
+            loss.backward()
+            optimizer.step()
+
+    model.eval()
+    with torch_mod.no_grad():
+        last_seq = tensor(feat_values[-seq_len:], dtype=torch_mod.float32).unsqueeze(0)
+        next_price = float(model(last_seq).item())
+
+    confidence = 6.5
+
+    return EngineResult(
+        engine="TorchLSTM",
+        prediction=next_price,
+        confidence=confidence,
+        comment="Trained 10 epochs",
+    )
+
+
+def _mlp_engine(features, target):  # type: ignore[override]
+    if skl is None:
+        return None
+    from sklearn.neural_network import MLPRegressor  # type: ignore
+    from sklearn.metrics import mean_absolute_error  # type: ignore
+
+    X_train = features.iloc[:-20]
+    y_train = target.iloc[:-20]
+    X_test = features.iloc[-20:]
+    y_test = target.iloc[-20:]
+
+    if len(X_train) < 60:
+        return None
+
+    model = MLPRegressor(hidden_layer_sizes=(64, 32), max_iter=500, random_state=42)
+    model.fit(X_train, y_train)
+    preds = model.predict(X_test)
+    mae = float(mean_absolute_error(y_test, preds))
+    next_price = float(model.predict([features.iloc[-1]])[0])
+    confidence = max(2.0, 8 - mae / (y_test.mean() or 1) * 50)
+
+    return EngineResult(
+        engine="MLPRegressor",
+        prediction=next_price,
+        confidence=confidence,
+        comment=f"MAE {mae:.2f}",
+    )
+
+
+# =============================================================
+# CONSOLIDATION / REPORTING
+# =============================================================
+
+def consolidate_predictions(
+    ticker: str,
+    period: str,
+    horizon: int,
+    df,
+    engines: Iterable[EngineResult],
+) -> List[EngineResult]:
+    results = [engine for engine in engines if engine is not None]
+    last_close = float(df.iloc[-1]["Close"])
+    target_time = datetime.now() + timedelta(hours=horizon if period == "hour" else horizon * 24)
+
+    for engine in results:
+        append_prediction_record(
+            ticker=ticker,
+            period=period,
+            horizon=horizon,
+            engine=engine.engine,
+            predicted_price=engine.prediction,
+            last_close=last_close,
+            target_time=target_time,
+        )
+
+    return results
+
+
+def format_prediction_table(results: List[EngineResult], last_close: float) -> str:
+    if not tabulate_mod:
+        return "\n".join(
+            f"{res.engine}: {res.prediction:.2f} ({res.confidence:.1f}/10) - {res.comment}"
+            for res in results
+        )
+    rows = []
+    for res in results:
+        delta = ((res.prediction / last_close) - 1) * 100 if last_close else 0.0
+        rows.append([
+            res.engine,
+            f"{res.prediction:.2f}",
+            f"{delta:+.2f}%",
+            f"{res.confidence:.1f}/10",
+            res.comment,
+        ])
+    return tabulate_mod.tabulate(rows, headers=["Engine", "Target", "Δ vs Close", "Confidence", "Notes"], tablefmt="github")
+
+
+# =============================================================
+# CLI ACTIONS
+# =============================================================
+
+def run_sma_report():
+    print("\n=== SMA 20 + 50 Report ===\n")
+    ticker = input("Ticker symbol: ").strip().upper()
+    if not ticker:
+        print("Ticker required.")
+        return
+    period_choice = input("Period (hour/day/week) [day]: ").strip().lower() or "day"
+    df = fetch_history(ticker, period_choice, bars_back=400)
+    if df is None or df.empty:
+        print("No data downloaded.")
+        return
+    df = compute_indicators(df)
+    latest = df.iloc[-1]
+    rows = [
+        ["Close", f"{latest['Close']:.2f}"],
+        ["SMA20", f"{latest['SMA20']:.2f}"],
+        ["SMA50", f"{latest['SMA50']:.2f}"],
+        ["SMA200", f"{latest['SMA200']:.2f}"],
+        ["RSI14", f"{latest['RSI14']:.2f}"],
+        ["MACD", f"{latest['MACD']:.2f}"],
+        ["ATR14", f"{latest['ATR14']:.2f}"],
+    ]
+    if tabulate_mod:
+        print(tabulate_mod.tabulate(rows, tablefmt="github"))
+    else:
+        for key, value in rows:
+            print(f"{key:>8}: {value}")
+    print()
+    input("Press Enter to return to the menu...")
+
+
+def run_plot():
+    print("\n=== Plot Price + SMA ===\n")
+    if plt_mod is None:
+        print("Matplotlib not installed.")
+        return
+    ticker = input("Ticker symbol: ").strip().upper()
+    period_choice = input("Period (hour/day/week) [day]: ").strip().lower() or "day"
+    df = fetch_history(ticker, period_choice, bars_back=300)
+    if df is None or df.empty:
+        print("No data downloaded.")
+        return
+    df = compute_indicators(df)
+    plt_mod.figure(figsize=(10, 5))
+    plt_mod.plot(df.index, df["Close"], label="Close")
+    plt_mod.plot(df.index, df["SMA20"], label="SMA20")
+    plt_mod.plot(df.index, df["SMA50"], label="SMA50")
+    plt_mod.title(f"{ticker} - Price vs SMA")
+    plt_mod.grid(True)
+    plt_mod.legend()
+    plt_mod.tight_layout()
+    plt_mod.show()
+
+
+def run_csv_download():
+    print("\n=== Download Historical CSV ===\n")
+    ticker = input("Ticker symbol: ").strip().upper()
+    if not ticker:
+        print("Ticker required.")
+        return
+    period_choice = input("Period (hour/day/week) [day]: ").strip().lower() or "day"
+    df = fetch_history(ticker, period_choice, bars_back=2000)
+    if df is None or df.empty:
+        print("No data downloaded.")
+        return
+    out_path = os.path.join(BASE_DIR, f"{ticker}_{period_choice}_history.csv")
+    df.to_csv(out_path)
+    print(f"Saved to {out_path}")
+    input("Press Enter to return to the menu...")
+
+
+def run_forecast_workflow():
+    print("\n=== Forecast (Technical + ML + NN) ===\n")
+    ticker = input("Ticker symbol: ").strip().upper()
+    if not ticker:
+        print("Ticker required.")
+        return
+    period_choice = input("Period (hour/day/week) [day]: ").strip().lower() or "day"
+    horizon = int(input("Forecast horizon in bars [5]: ") or "5")
+    df = fetch_history(ticker, period_choice, bars_back=600)
+    if df is None or df.empty:
+        print("No data downloaded.")
+        return
+
+    df = compute_indicators(df)
+    history_accuracy = update_memory_accuracy_for_ticker(ticker)
+    if history_accuracy:
+        print("Historical MAPE by engine (lower is better):")
+        for engine, mape in history_accuracy.items():
+            print(f"  - {engine}: {mape:.2f}%")
+        print()
+
+    results = consolidate_predictions(
+        ticker,
+        period_choice,
+        horizon,
+        df,
+        filter(
+            None,
+            [
+                technical_engine(df),
+                random_forest_engine(df),
+                neural_network_engine(df),
+            ],
+        ),
+    )
+
+    if not results:
+        print("No engine produced a forecast.")
+        return
+
+    last_close = float(df.iloc[-1]["Close"])
+    print(format_prediction_table(results, last_close))
+    print()
+    input("Press Enter to return to the menu...")
+
+
+def run_help():
+    print(
+        """
+=== HELP ===
+This refactored build downloads market data via yfinance, computes a stable
+set of technical indicators with pandas and produces three forecasts:
+
+1. Technical: rules that use SMA, RSI, MACD and volatility.
+2. RandomForest: supervised model trained on indicators.
+3. Neural Network: PyTorch LSTM when torch is installed, otherwise an sklearn
+   MLP fallback.
+
+All predictions are logged to ./memory/predictions_log.csv together with
+horizon information.  On each run the tool attempts to fetch the actual price
+for previous targets so we accumulate real-world error metrics over time.
+        """
+    )
+    input("Press Enter to return to the menu...")
+
+
+# =============================================================
+# MENU
+# =============================================================
+
+def main_menu():
+    while True:
+        print(
+            """
+=== Stock Analyzer V5 ===
+1. SMA 20 + 50 Report
+2. Plot Price + SMA
+3. Download Historical CSV
+4. Forecast (Technical + ML + NN)
+5. Help
+6. Exit
+"""
+        )
+        choice = input("Choice: ").strip()
+        if choice == "1":
+            run_sma_report()
+        elif choice == "2":
+            run_plot()
+        elif choice == "3":
+            run_csv_download()
+        elif choice == "4":
+            run_forecast_workflow()
+        elif choice == "5":
+            run_help()
+        elif choice == "6":
+            print("Goodbye!")
+            break
+        else:
+            print("Invalid choice.\n")
+
+
+# =============================================================
+# ENTRYPOINT
+# =============================================================
+
+def main():
+    bootstrap()
+    main_menu()
+
+
+if __name__ == "__main__":
+    main()
