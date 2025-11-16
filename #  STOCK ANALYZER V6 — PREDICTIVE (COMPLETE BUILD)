@@ -385,6 +385,124 @@ def build_feature_frame(df):
 
 
 # =============================================================
+# NEWS SIGNALS
+# =============================================================
+
+POSITIVE_KEYWORDS = [
+    "beat",
+    "surge",
+    "record",
+    "upgrade",
+    "outperform",
+    "growth",
+    "strong",
+]
+
+NEGATIVE_KEYWORDS = [
+    "miss",
+    "downgrade",
+    "lawsuit",
+    "recall",
+    "probe",
+    "slump",
+    "weak",
+]
+
+
+def _score_headline(title: str) -> int:
+    title_lower = title.lower()
+    score = 0
+    for keyword in POSITIVE_KEYWORDS:
+        if keyword in title_lower:
+            score += 1
+    for keyword in NEGATIVE_KEYWORDS:
+        if keyword in title_lower:
+            score -= 1
+    return score
+
+
+def collect_news_context(
+    ticker: str, horizon_days: int = 7, headline_limit: int = 10
+) -> Dict[str, object]:
+    if yfinance is None:
+        return {
+            "sentiment": 0,
+            "headline_count": 0,
+            "sources": [],
+            "upcoming_events": [],
+        }
+
+    context: Dict[str, object] = {
+        "sentiment": 0,
+        "headline_count": 0,
+        "sources": [],
+        "upcoming_events": [],
+    }
+
+    try:
+        ticker_obj = yfinance.Ticker(ticker)
+        news_items = ticker_obj.news or []
+    except Exception:
+        news_items = []
+        ticker_obj = None
+
+    for item in news_items[:headline_limit]:
+        title = str(item.get("title") or "").strip()
+        if not title:
+            continue
+        publisher = item.get("publisher") or "unknown"
+        link = item.get("link") or item.get("url") or ""
+        ts = item.get("providerPublishTime")
+        published = None
+        if isinstance(ts, (int, float)):
+            try:
+                published = datetime.fromtimestamp(ts)
+            except Exception:
+                published = None
+        score_delta = _score_headline(title)
+        context["sentiment"] = int(context.get("sentiment", 0)) + score_delta
+        context["headline_count"] = int(context.get("headline_count", 0)) + 1
+        sources = context.get("sources", [])
+        if isinstance(sources, list):
+            sources.append(
+                {
+                    "title": title,
+                    "publisher": publisher,
+                    "link": link,
+                    "published": published,
+                    "sentiment": score_delta,
+                }
+            )
+        context["sources"] = sources
+
+    if ticker_obj is not None:
+        try:
+            calendar = ticker_obj.get_calendar()
+            if hasattr(calendar, "index") and not calendar.empty:
+                for event_key in ["Earnings Date", "Earnings Date*"]:
+                    if event_key in calendar.index:
+                        raw = calendar.loc[event_key]
+                        if hasattr(raw, "__iter__"):
+                            for value in raw:
+                                event_date = None
+                                if hasattr(value, "to_pydatetime"):
+                                    event_date = value.to_pydatetime()
+                                elif isinstance(value, datetime):
+                                    event_date = value
+                                if not event_date:
+                                    continue
+                                if datetime.now() <= event_date <= datetime.now() + timedelta(days=horizon_days):
+                                    context["upcoming_events"].append(
+                                        f"Earnings on {event_date.date()}"
+                                    )
+                        break
+        except Exception:
+            pass
+
+    return context
+
+
+# =============================================================
 # FORECAST ENGINES
 # =============================================================
 
@@ -659,6 +777,43 @@ def _mlp_engine(features, target):  # type: ignore[override]
         prediction=next_price,
         confidence=confidence,
         comment=f"MAE {mae:.2f}",
+    )
+
+
+def news_sentiment_engine(
+    ticker: str, df, news_context: Dict[str, object]
+) -> Optional[EngineResult]:  # type: ignore[override]
+    if df is None or df.empty:
+        return None
+
+    last_close = float(df.iloc[-1]["Close"])
+    headline_count = int(news_context.get("headline_count", 0) or 0)
+    sentiment = int(news_context.get("sentiment", 0) or 0)
+    upcoming_events = news_context.get("upcoming_events", [])
+
+    if headline_count == 0 and not upcoming_events:
+        return EngineResult(
+            engine="NewsSentiment",
+            prediction=last_close,
+            confidence=4.0,
+            comment="No recent headlines found",
+        )
+
+    sentiment_adjustment = max(-3.0, min(3.0, float(sentiment)))
+    event_risk = 0.5 * len(upcoming_events) if isinstance(upcoming_events, list) else 0.0
+    prediction = last_close * (1 + sentiment_adjustment * 0.004)
+    confidence = max(1.0, min(10.0, 5 + sentiment_adjustment - event_risk))
+
+    event_note = ""
+    if upcoming_events:
+        readable_events = "; ".join(str(evt) for evt in upcoming_events)
+        event_note = f"; {readable_events}"
+
+    return EngineResult(
+        engine="NewsSentiment",
+        prediction=float(prediction),
+        confidence=float(confidence),
+        comment=f"Net sentiment {sentiment:+} from {headline_count} headlines{event_note}",
     )
 
 
@@ -961,7 +1116,8 @@ def run_forecast_workflow(
         return
 
     df = compute_indicators(df)
-    last_close = float(df.iloc[-1]["Close"])
+    horizon_days = max(1, math.ceil(horizon / 6)) if period_choice == "hour" else max(1, horizon)
+    news_context = collect_news_context(ticker, horizon_days=horizon_days)
     history_accuracy = update_memory_accuracy_for_ticker(ticker)
     if history_accuracy:
         print("Historical MAPE by engine (lower is better):")
@@ -981,6 +1137,7 @@ def run_forecast_workflow(
                 analyst_consensus_engine(ticker, last_close),
                 random_forest_engine(df),
                 neural_network_engine(df),
+                news_sentiment_engine(ticker, df, news_context),
             ],
         ),
         band_percent=band,
@@ -995,6 +1152,74 @@ def run_forecast_workflow(
         f"Probabilities reflect the chance of landing within ±{band:.1f}% of each target using recent volatility."
     )
     print()
+    sources = news_context.get("sources", []) if isinstance(news_context, dict) else []
+    if sources:
+        print("News sources factored into the forecast:")
+        for src in sources:
+            published = src.get("published")
+            ts = published.strftime("%Y-%m-%d %H:%M") if hasattr(published, "strftime") else "n/a"
+            sentiment_note = f"sentiment {src.get('sentiment', 0):+d}"
+            link = src.get("link") or ""
+            link_note = f" → {link}" if link else ""
+            print(f"  - {src.get('publisher', 'unknown')} ({ts}): {src.get('title', '').strip()} [{sentiment_note}]{link_note}")
+    else:
+        print("No recent headlines were available for news weighting.")
+    print()
+    maybe_pause(pause)
+
+
+def run_training_workflow(pause: bool = True) -> None:
+    print("\n=== Training / Self-Evaluation ===\n")
+    ensure_memory_file()
+    try:
+        df = pd.read_csv(MEM_FILE)
+    except Exception as exc:
+        print(f"Could not load memory file: {exc}")
+        maybe_pause(pause)
+        return
+
+    if df.empty:
+        print("No prediction history found. Run forecasts to generate training data.")
+        maybe_pause(pause)
+        return
+
+    tickers = sorted(df["ticker"].dropna().unique())
+    completed = int(df["actual_price"].notna().sum())
+    pending = int(len(df) - completed)
+
+    print(
+        "Found {rows} prediction records across {tickers} tracked tickers.".format(
+            rows=len(df), tickers=len(tickers)
+        )
+    )
+    print(f"Completed predictions with actual prices: {completed}")
+    print(f"Pending predictions awaiting actual prices: {pending}")
+
+    per_ticker_accuracy: Dict[str, Dict[str, float]] = {}
+    global_accuracy: Dict[str, List[float]] = {}
+
+    for ticker in tickers:
+        accuracy = update_memory_accuracy_for_ticker(ticker)
+        if not accuracy:
+            continue
+        per_ticker_accuracy[ticker] = accuracy
+        for engine, mape in accuracy.items():
+            global_accuracy.setdefault(engine, []).append(mape)
+
+    if per_ticker_accuracy:
+        print("\nUpdated MAPE (by ticker and engine):")
+        for ticker, scores in per_ticker_accuracy.items():
+            parts = ", ".join(f"{engine}: {mape:.2f}%" for engine, mape in scores.items())
+            print(f"  - {ticker}: {parts}")
+    else:
+        print("\nNo tickers have evaluable targets yet; waiting for target times to elapse.")
+
+    if global_accuracy:
+        print("\nAverage MAPE across all tracked tickers:")
+        for engine, values in global_accuracy.items():
+            avg_mape = sum(values) / len(values)
+            print(f"  - {engine}: {avg_mape:.2f}% (n={len(values)})")
+
     maybe_pause(pause)
 
 
@@ -1011,6 +1236,8 @@ set of technical indicators with pandas and produces four forecasts:
 3. RandomForest: supervised model trained on indicators.
 4. Neural Network: PyTorch LSTM when torch is installed, otherwise an sklearn
    MLP fallback.
+4. NewsSentiment: headline tone and nearby earnings events weighted into the
+   forecast, with the factored sources listed below the table.
 
 All predictions are logged to ./memory/predictions_log.csv together with
 horizon information.  On each run the tool attempts to fetch the actual price
@@ -1023,7 +1250,7 @@ band around each target based on recent volatility.
 
 
 def run_diagnostics(pause: bool = True) -> None:
-    print(f"\n=== Diagnostics (build {VERSION}) ===\n")
+    print(f"\n=== System Diagnostics for Market Monitoring & ML (build {VERSION}) ===\n")
     dependency_states = [
         ("yfinance", yfinance is not None),
         ("pandas", pd is not None),
@@ -1081,6 +1308,16 @@ def run_diagnostics(pause: bool = True) -> None:
 def main_menu():
     while True:
         print(
+            f"""
+=== Stock Analyzer {VERSION} ===
+1. SMA 20 + 50 Report
+2. Plot Price + SMA
+3. Download Historical CSV
+4. Forecast (Technical + ML + NN)
+5. Help
+6. System Diagnostics (Monitoring/ML)
+7. Exit
+"""
             f"\n{divider('=')}\nStock Analyzer {VERSION} — Main Menu\n{divider('-')}"
         )
         print_panel(
@@ -1090,13 +1327,14 @@ def main_menu():
                 "2 → Plot price with SMA overlays (save or display)",
                 "3 → Download historical candles as a CSV export",
                 "4 → Forecast price movement (technical + ML + NN)",
-                "5 → Help and usage guidance",
-                "6 → Diagnostics and environment checks",
-                "7 → Exit the analyzer",
+                "5 → Train from stored predictions for self-evaluation",
+                "6 → Help and usage guidance",
+                "7 → Diagnostics and environment checks",
+                "8 → Exit the analyzer",
             ],
         )
-        print("Enter the menu number (1-7) as a single digit.")
-        choice = input("Choice [1-7]: ").strip()
+        print("Enter the menu number (1-8) as a single digit.")
+        choice = input("Choice [1-8]: ").strip()
         if choice == "1":
             run_sma_report()
         elif choice == "2":
@@ -1106,10 +1344,12 @@ def main_menu():
         elif choice == "4":
             run_forecast_workflow()
         elif choice == "5":
-            run_help()
+            run_training_workflow()
         elif choice == "6":
-            run_diagnostics()
+            run_help()
         elif choice == "7":
+            run_diagnostics()
+        elif choice == "8":
             print("Goodbye!")
             break
         else:
@@ -1125,7 +1365,16 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Stock Analyzer V6")
     parser.add_argument(
         "--action",
-        choices=["menu", "sma", "plot", "csv", "forecast", "help", "diagnostics"],
+        choices=[
+            "menu",
+            "sma",
+            "plot",
+            "csv",
+            "forecast",
+            "train",
+            "help",
+            "diagnostics",
+        ],
         default="menu",
         help="Workflow to run (default: interactive menu)",
     )
@@ -1182,6 +1431,8 @@ def dispatch_cli_action(args) -> None:
             band=args.band,
             pause=False,
         )
+    elif action == "train":
+        run_training_workflow(pause=False)
     elif action == "help":
         run_help(pause=False)
     elif action == "diagnostics":
