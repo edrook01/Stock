@@ -1,0 +1,114 @@
+# =============================================================
+#  STOCK ANALYZER V5 — PREDICTIVE (CLEAN + HARDENED BUILD)
+#  Mode B: Fully Refactored + Crash-Proof + Stable Forecasting
+# =============================================================
+
+import os
+import sys
+import subprocess
+import time
+import importlib
+from datetime import datetime, timedelta
+
+print("\n=== Stock Analyzer V4 - Predictive (Refactored Build) ===\n")
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+LIB_DIR = os.path.join(BASE_DIR, "libs")
+MEM_DIR = os.path.join(BASE_DIR, "memory")
+
+os.makedirs(LIB_DIR, exist_ok=True)
+os.makedirs(MEM_DIR, exist_ok=True)
+sys.path.insert(0, LIB_DIR)
+
+MEM_FILE = os.path.join(MEM_DIR, "predictions_log.csv")
+
+
+# =============================================================
+# DEPENDENCIES
+# =============================================================
+
+PACKAGE_SPECS = {
+    "yfinance": ("yfinance", "0.2.66"),
+    "pandas": ("pandas", "2.2.2"),
+    "numpy": ("numpy", "1.26.4"),
+    "ta": ("ta", "0.11.0"),
+    "pandas_ta": ("pandas_ta", "0.4.71b0"),
+    "sklearn": ("scikit-learn", "1.3.2"),
+    "requests": ("requests", "2.32.3"),
+    "tabulate": ("tabulate", "0.9.0"),
+    "matplotlib": ("matplotlib", "3.8.4"),
+    "torch": ("torch", None),  # optional
+}
+
+
+def log(msg):
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    print(f"[{ts}] {msg}")
+
+
+def install_packages_local():
+    log("Checking dependencies...")
+    for import_name, (pip_name, version) in PACKAGE_SPECS.items():
+        optional = (import_name == "torch")
+
+        try:
+            importlib.import_module(import_name)
+            log(f"✔ {import_name} OK")
+            continue
+        except Exception:
+            log(f"✘ Installing {pip_name} ...")
+
+        pkg_str = pip_name if version is None else f"{pip_name}=={version}"
+
+        try:
+            subprocess.check_call([
+                sys.executable, "-m", "pip", "install",
+                pkg_str, "--target", LIB_DIR, "--upgrade",
+                "--no-warn-script-location"
+            ])
+            log(f"✔ Installed {pkg_str}")
+        except Exception as e:
+            log(f"!! Failed: {e}")
+            if optional:
+                log("Skipping optional torch")
+                continue
+            sys.exit(1)
+
+    print()
+
+
+def safe_import(name):
+    try:
+        return importlib.import_module(name)
+    except Exception as e:
+        log(f"Import error: {name} → {e}")
+        return None
+
+
+def bootstrap():
+    print("Bootstrapping...")
+    install_packages_local()
+
+    global yfinance, pd, np, ta_mod, pta, skl
+    global requests_mod, tabulate_mod
+
+    yfinance = safe_import("yfinance")
+    pd = safe_import("pandas")
+    np = safe_import("numpy")
+    ta_mod = safe_import("ta")
+    pta = safe_import("pandas_ta")
+    skl = safe_import("sklearn")
+    requests_mod = safe_import("requests")
+    tabulate_mod = safe_import("tabulate")
+
+    if yfinance is None or pd is None or np is None:
+        print("Critical imports failed. Exiting.")
+        sys.exit(1)
+
+    log("Bootstrap complete.\n")
+
+
+# =============================================================
+# MEMORY / PREDICTION HISTORY SYSTEM
+# (kept unchanged except for small stability fixes later)
+# =============================================================
