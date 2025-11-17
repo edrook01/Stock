@@ -929,6 +929,47 @@ def technical_engine(df) -> Optional[EngineResult]:  # type: ignore[override]
     )
 
 
+def online_lightweight_engine(df) -> Optional[EngineResult]:  # type: ignore[override]
+    """Fast, low-footprint regressor for quick “online” estimates.
+
+    This model intentionally avoids heavy tuning so it can run frequently with
+    minimal overhead while still reacting to the most recent price action.
+    """
+
+    if skl is None or np is None or df is None or df.empty:
+        return None
+
+    closes = df["Close"].tail(30)
+    if len(closes) < 8:
+        return None
+
+    try:
+        from sklearn.linear_model import LinearRegression  # type: ignore
+    except Exception:
+        return None
+
+    x_idx = np.arange(len(closes)).reshape(-1, 1)
+    model = LinearRegression()
+    model.fit(x_idx, closes.values)
+
+    trend_prediction = float(model.predict([[len(closes)]])[0])
+    residuals = closes.values - model.predict(x_idx)
+    noise = float(np.std(residuals)) if len(residuals) > 1 else 0.0
+    slope = float(model.coef_[0])
+
+    last_close = float(closes.iloc[-1])
+    stability_penalty = min(3.0, (noise / max(1e-6, last_close)) * 20)
+    trend_bonus = max(-1.0, min(1.5, slope / max(1e-6, last_close) * 50))
+    confidence = max(2.5, min(8.5, 6.0 + trend_bonus - stability_penalty))
+
+    return EngineResult(
+        engine="OnlineEstimate",
+        prediction=trend_prediction,
+        confidence=confidence,
+        comment=f"Linear trend {slope:+.4f}, noise {noise:.4f}",
+    )
+
+
 def analyst_consensus_engine(ticker: str, last_close: float) -> Optional[EngineResult]:  # type: ignore[override]
     if yfinance is None:
         return None
@@ -1688,21 +1729,26 @@ def run_forecast_workflow(
                 print(f"  - {engine}: {mape:.2f}%")
             print()
 
-        results = consolidate_predictions(
-            ticker,
-            period_choice,
-            horizon,
-            df,
+        engine_outputs = list(
             filter(
                 None,
                 [
                     technical_engine(df),
+                    online_lightweight_engine(df),
                     analyst_consensus_engine(ticker, last_close),
                     random_forest_engine(df),
                     neural_network_engine(df),
                     news_sentiment_engine(ticker, df, news_context),
                 ],
-            ),
+            )
+        )
+
+        results = consolidate_predictions(
+            ticker,
+            period_choice,
+            horizon,
+            df,
+            engine_outputs,
             band_percent=band,
         )
 
@@ -1732,7 +1778,34 @@ def run_forecast_workflow(
                 log(f"Low confidence: {reason}")
 
         else:
-            print(format_prediction_table(results, last_close))
+            technical_only = [res for res in results if res.engine == "Technical"]
+            online_estimate = [res for res in results if res.engine == "OnlineEstimate"]
+            primary_learned = [
+                res
+                for res in results
+                if res.engine in {"RandomForest", "MLPRegressor", "TorchLSTM"}
+            ]
+            supporting = [
+                res
+                for res in results
+                if res not in (technical_only + online_estimate + primary_learned)
+            ]
+
+            sections = []
+            if technical_only:
+                sections.append(("Technical snapshot", technical_only))
+            if online_estimate:
+                sections.append(("Online quick estimate", online_estimate))
+            if primary_learned:
+                sections.append(("Primary learned forecasts", primary_learned))
+            if supporting:
+                sections.append(("Supporting signals", supporting))
+
+            for title, segment in sections:
+                print(title)
+                print(format_prediction_table(segment, last_close))
+                print()
+
             print(
                 f"Probabilities reflect the chance of landing within ±{band:.1f}% of each target using recent volatility."
             )
