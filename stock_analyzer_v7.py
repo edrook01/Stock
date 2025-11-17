@@ -496,7 +496,8 @@ INTERVAL_MAP = {
     "week": ("max", "1wk"),
     "month": ("max", "1mo"),
     "quarter": ("max", "3mo"),
-    "year": ("max", "1y"),
+    # Yahoo Finance does not support a 1y interval; use 1mo to sample yearly spans.
+    "year": ("max", "1mo"),
 }
 
 LONG_PERIODS = {"month", "quarter", "year"}
