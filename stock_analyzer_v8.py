@@ -27,18 +27,26 @@ from datetime import datetime, timedelta
 from typing import Dict, Iterable, List, Optional, Tuple
 
 VERSION = "V8"
-print(f"\n=== Stock Analyzer {VERSION} - Predictive (Complete Build) ===\n")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 LIB_DIR = os.path.join(BASE_DIR, "libs")
 MEM_DIR = os.path.join(BASE_DIR, "memory")
 DATA_DIR = os.path.join(BASE_DIR, "data")
 
-os.makedirs(DATA_DIR, exist_ok=True)
 
-os.makedirs(LIB_DIR, exist_ok=True)
-os.makedirs(MEM_DIR, exist_ok=True)
-sys.path.insert(0, LIB_DIR)
+def ensure_directories() -> None:
+    os.makedirs(DATA_DIR, exist_ok=True)
+    os.makedirs(LIB_DIR, exist_ok=True)
+    os.makedirs(MEM_DIR, exist_ok=True)
+
+
+def ensure_lib_path() -> None:
+    if LIB_DIR not in sys.path:
+        sys.path.insert(0, LIB_DIR)
+
+
+def print_banner() -> None:
+    print(f"\n=== Stock Analyzer {VERSION} - Predictive (Complete Build) ===\n")
 
 MEM_FILE = os.path.join(MEM_DIR, "predictions_log.csv")
 DEFAULT_BAND_PERCENT = 5.0
@@ -155,6 +163,8 @@ def safe_import(name: str):  # type: ignore[override]
 
 
 def bootstrap(clear_after: bool = False) -> None:
+    ensure_directories()
+    ensure_lib_path()
     log("Bootstrapping...")
     install_packages_local()
 
@@ -2358,6 +2368,7 @@ def dispatch_cli_action(args) -> None:
 
 
 def main(argv: Optional[List[str]] = None) -> None:
+    print_banner()
     parser = build_arg_parser()
     args = parser.parse_args(argv)
     bootstrap()
