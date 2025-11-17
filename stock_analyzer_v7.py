@@ -1936,6 +1936,45 @@ def run_self_test(pause: bool = True) -> None:
     maybe_pause(pause)
 
 
+def run_auto_evaluation_workflow(review_limit: int = 10) -> None:
+    print("\n=== Auto Ticker Self-Evaluation ===\n")
+    tracked_tickers = discover_tracked_tickers()
+    track_periods = list(INTERVAL_MAP.keys())
+    combos = [(ticker, period) for ticker in tracked_tickers for period in track_periods]
+
+    ready_combos: List[Tuple[str, str]] = []
+    for ticker, period_choice in combos:
+        history = fetch_history(
+            ticker,
+            period_choice,
+            bars_back=default_bars_for_period(period_choice),
+        )
+        if history is None or history.empty:
+            log(f"No history available for {ticker} ({period_choice}); skipping.")
+            continue
+        log(
+            "History ready for {ticker} ({period}); {bars} bars downloaded.".format(
+                ticker=ticker, period=period_choice, bars=len(history)
+            )
+        )
+        ready_combos.append((ticker, period_choice))
+
+    if not ready_combos:
+        print("Could not fetch history for any tracked ticker/period pair.")
+        return
+
+    for ticker, period_choice in ready_combos:
+        run_forecast_workflow(
+            ticker=ticker,
+            period_choice=period_choice,
+            pause=False,
+            quiet=True,
+        )
+
+    run_training_workflow(pause=False, loop=False, periods=track_periods)
+    run_review_workflow(pause=False, limit=review_limit)
+
+
 # =============================================================
 # MENU
 # =============================================================
@@ -1948,37 +1987,28 @@ def main_menu():
             [
                 "1 → SMA 20 + 50 snapshot with current indicators",
                 "2 → Plot price with SMA overlays (save or display)",
-                "3 → Download historical candles as a CSV export",
-                "4 → Forecast price movement (technical + ML + NN)",
-                "5 → Review recent prediction history",
-                "6 → Train from stored predictions for self-evaluation",
-                "7 → Help and usage guidance",
-                "8 → Diagnostics and environment checks",
-                "9 → Offline self-test using synthetic data",
-                "10 → Exit the analyzer",
+                "3 → Auto Ticker Self-Evaluation",
+                "4 → Help and usage guidance",
+                "5 → Diagnostics and environment checks",
+                "6 → Offline self-test using synthetic data",
+                "7 → Exit the analyzer",
             ],
         )
-        print("Enter the menu number (1-10).")
-        choice = input("Choice [1-10]: ").strip()
+        print("Enter the menu number (1-7).")
+        choice = input("Choice [1-7]: ").strip()
         if choice == "1":
             run_sma_report()
         elif choice == "2":
             run_plot()
         elif choice == "3":
-            run_csv_download()
+            run_auto_evaluation_workflow()
         elif choice == "4":
-            run_forecast_workflow()
-        elif choice == "5":
-            run_review_workflow()
-        elif choice == "6":
-            run_training_workflow(loop=False)
-        elif choice == "7":
             run_help()
-        elif choice == "8":
+        elif choice == "5":
             run_diagnostics()
-        elif choice == "9":
+        elif choice == "6":
             run_self_test()
-        elif choice == "10":
+        elif choice == "7":
             print("Goodbye!")
             break
         else:
@@ -2000,6 +2030,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
             "plot",
             "csv",
             "forecast",
+            "auto-eval",
             "review",
             "train",
             "help",
@@ -2085,6 +2116,8 @@ def dispatch_cli_action(args) -> None:
             band=args.band,
             pause=False,
         )
+    elif action == "auto-eval":
+        run_auto_evaluation_workflow(review_limit=args.review_limit)
     elif action == "review":
         run_review_workflow(
             pause=False,
