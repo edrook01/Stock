@@ -1,0 +1,12 @@
+ticker,name,exchange
+AAPL,Apple Inc.,NASDAQ
+MSFT,Microsoft Corp.,NASDAQ
+GOOGL,Alphabet Inc. Class A,NASDAQ
+AMZN,Amazon.com Inc.,NASDAQ
+NVDA,NVIDIA Corp.,NASDAQ
+TSLA,Tesla Inc.,NASDAQ
+SPY,SPDR S&P 500 ETF Trust,NYSEARCA
+QQQ,Invesco QQQ Trust,NYSEARCA
+XLK,Technology Select Sector SPDR Fund,NYSEARCA
+AVGO,Broadcom Inc.,NASDAQ
+ASML,ASML Holding NV,NASDAQ
