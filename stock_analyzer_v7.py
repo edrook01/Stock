@@ -11,8 +11,11 @@ debug on fresh machines.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import csv
+import io
 import math
+import random
 import os
 import sys
 import subprocess
@@ -371,7 +374,7 @@ def default_horizon_for_period(period_choice: str) -> int:
         return 6
     if period_choice == "week":
         return 1
-    if period_choice in ("month", "quarter", "year"):
+    if period_choice in ("month", "quarter"):
         return 1
     return 3
 
@@ -388,8 +391,6 @@ def horizon_days_for_period(period_choice: str, horizon: int) -> int:
         return max(1, horizon * 30)
     if normalized == "quarter":
         return max(1, horizon * 90)
-    if normalized == "year":
-        return max(1, horizon * 365)
     return max(1, horizon)
 
 
@@ -496,11 +497,9 @@ INTERVAL_MAP = {
     "week": ("max", "1wk"),
     "month": ("max", "1mo"),
     "quarter": ("max", "3mo"),
-    # Yahoo Finance does not support a 1y interval; use 1mo to sample yearly spans.
-    "year": ("max", "1mo"),
 }
 
-LONG_PERIODS = {"month", "quarter", "year"}
+LONG_PERIODS = {"month", "quarter"}
 
 
 def default_bars_for_period(period_choice: str) -> Optional[int]:
@@ -897,15 +896,68 @@ def analyst_consensus_engine(ticker: str, last_close: float) -> Optional[EngineR
         except Exception:
             return None
 
-    info = None
-    try:
-        info = yfinance.Ticker(ticker).get_info()
-    except Exception:
-        try:
-            info = yfinance.Ticker(ticker).info
-        except Exception:
-            return None
+    def _probe_quote_summary() -> Dict:
+        """Try direct Yahoo Finance quoteSummary endpoints to recover from 404s.
 
+        yfinance occasionally ships outdated endpoints. When that happens we
+        opportunistically scan known base URLs (query2/query1/fc) for a working
+        quoteSummary response so the caller still gets analyst targets without
+        needing a manual code update.
+        """
+
+        if requests_mod is None:
+            return {}
+
+        modules = ["financialData", "defaultKeyStatistics", "price"]
+        base_urls = [
+            "https://query2.finance.yahoo.com",
+            "https://query1.finance.yahoo.com",
+            "https://fc.yahoo.com",
+        ]
+
+        for base in base_urls:
+            try:
+                response = requests_mod.get(
+                    f"{base}/v7/finance/quoteSummary/{ticker}",
+                    params={"modules": ",".join(modules)},
+                    timeout=8,
+                )
+                if response.status_code == 404:
+                    continue
+                response.raise_for_status()
+                payload = response.json() or {}
+                result = (
+                    payload.get("quoteSummary", {}).get("result") or []
+                )
+                if not result:
+                    continue
+                merged: Dict = {"_source_url": response.url}
+                for module_payload in result[0].values():
+                    if isinstance(module_payload, dict):
+                        merged.update(module_payload)
+                return merged
+            except Exception:
+                continue
+
+        return {}
+
+    def _fetch_info_safely() -> Dict:
+        try:
+            ticker_obj = yfinance.Ticker(ticker)
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(
+                io.StringIO()
+            ):
+                return ticker_obj.get_info()
+        except Exception:
+            try:
+                with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(
+                    io.StringIO()
+                ):
+                    return yfinance.Ticker(ticker).info
+            except Exception:
+                return _probe_quote_summary()
+
+    info = _fetch_info_safely() or _probe_quote_summary()
     if not info:
         return None
 
@@ -917,6 +969,23 @@ def analyst_consensus_engine(ticker: str, last_close: float) -> Optional[EngineR
     fallback_price = _coerce(info.get("currentPrice")) or _coerce(
         info.get("regularMarketPrice")
     )
+    if fallback_price is None:
+        try:
+            fast_info = yfinance.Ticker(ticker).fast_info  # type: ignore[attr-defined]
+            if isinstance(fast_info, dict):
+                fallback_price = _coerce(
+                    fast_info.get("last_price")
+                    or fast_info.get("lastPrice")
+                    or fast_info.get("regularMarketPrice")
+                )
+            else:
+                fallback_price = _coerce(
+                    getattr(fast_info, "last_price", None)
+                    or getattr(fast_info, "lastPrice", None)
+                    or getattr(fast_info, "regularMarketPrice", None)
+                )
+        except Exception:
+            fallback_price = None
     prediction = target_mean or (
         (target_high and target_low and (target_high + target_low) / 2)
     ) or fallback_price or last_close
@@ -1252,7 +1321,7 @@ def run_sma_report(
         period_choice
         or guided_prompt(
             "Period",
-            "Choose one of: hour, day, week, month, quarter, or year to set candle duration.",
+            "Choose one of: hour, day, week, month, or quarter to set candle duration.",
             "day",
             "day",
         )
@@ -1373,7 +1442,7 @@ def run_plot(
         period_choice
         or guided_prompt(
             "Period",
-            "Select hour, day, week, month, quarter, or year to match your plotting cadence.",
+            "Select hour, day, week, month, or quarter to match your plotting cadence.",
             "week",
             "day",
         )
@@ -1425,7 +1494,7 @@ def run_csv_download(
         period_choice
         or guided_prompt(
             "Period",
-            "Pick hour, day, week, month, quarter, or year candles for the CSV output.",
+            "Pick hour, day, week, month, or quarter candles for the CSV output.",
             "hour",
             "day",
         )
@@ -1479,7 +1548,7 @@ def run_forecast_workflow(
             else:
                 period_choice = guided_prompt(
                     "Period",
-                    "Choose the candle size: hour, day, week, month, quarter, or year.",
+                    "Choose the candle size: hour, day, week, month, or quarter.",
                     "hour",
                     "day",
                 )
@@ -1898,6 +1967,12 @@ Automation: --action train runs a single self-evaluation cycle by default.
 Pass --auto-train to keep it running in a loop, and adjust --train-interval
 to control how many seconds the workflow sleeps between cycles. The loop
 listens for SIGINT/SIGTERM so it can stop gracefully in unattended mode.
+
+Continuous auto-evaluation: --action auto-eval now accepts --auto-eval-loop
+and --eval-interval to keep cycling through the full ticker universe. Use
+--max-tickers if you want to cap the universe per pass when dealing with very
+large symbol lists while still collecting hundreds of thousands of samples
+over time.
         """
     )
     maybe_pause(pause)
@@ -2002,43 +2077,78 @@ def run_self_test(pause: bool = True) -> None:
     maybe_pause(pause)
 
 
-def run_auto_evaluation_workflow(review_limit: int = 10) -> None:
-    print("\n=== Auto Ticker Self-Evaluation ===\n")
-    tracked_tickers = discover_tracked_tickers()
-    track_periods = list(INTERVAL_MAP.keys())
-    combos = [(ticker, period) for ticker in tracked_tickers for period in track_periods]
+def run_auto_evaluation_workflow(
+    review_limit: int = 10,
+    loop: bool = False,
+    sleep_interval: int = 300,
+    max_tickers: Optional[int] = None,
+) -> None:
+    """Cycle through the full ticker universe (optionally in a loop)."""
 
-    ready_combos: List[Tuple[str, str]] = []
-    for ticker, period_choice in combos:
-        history = fetch_history(
-            ticker,
-            period_choice,
-            bars_back=default_bars_for_period(period_choice),
-        )
-        if history is None or history.empty:
-            log(f"No history available for {ticker} ({period_choice}); skipping.")
-            continue
+    def execute_pass() -> bool:
+        print("\n=== Auto Ticker Self-Evaluation ===\n")
+
+        tracked_tickers = discover_tracked_tickers()
+        if max_tickers is not None:
+            tracked_tickers = tracked_tickers[:max_tickers]
+
+        if not tracked_tickers:
+            print("No tickers available to evaluate.")
+            return False
+
+        random.shuffle(tracked_tickers)
+        track_periods = list(INTERVAL_MAP.keys())
+        combos = [(ticker, period) for ticker in tracked_tickers for period in track_periods]
+
+        ready_combos: List[Tuple[str, str]] = []
+        for ticker, period_choice in combos:
+            history = fetch_history(
+                ticker,
+                period_choice,
+                bars_back=default_bars_for_period(period_choice),
+            )
+            if history is None or history.empty:
+                log(f"No history available for {ticker} ({period_choice}); skipping.")
+                continue
+            log(
+                "History ready for {ticker} ({period}); {bars} bars downloaded.".format(
+                    ticker=ticker, period=period_choice, bars=len(history)
+                )
+            )
+            ready_combos.append((ticker, period_choice))
+
+        if not ready_combos:
+            print("Could not fetch history for any tracked ticker/period pair.")
+            return False
+
+        for ticker, period_choice in ready_combos:
+            run_forecast_workflow(
+                ticker=ticker,
+                period_choice=period_choice,
+                pause=False,
+                quiet=True,
+            )
+
+        run_training_workflow(pause=False, loop=False, periods=track_periods)
+        run_review_workflow(pause=False, limit=review_limit)
+        return True
+
+    while True:
+        work_done = execute_pass()
+        if not loop:
+            break
+        if not work_done:
+            log("No tickers processed on this pass; retrying after the sleep interval.")
         log(
-            "History ready for {ticker} ({period}); {bars} bars downloaded.".format(
-                ticker=ticker, period=period_choice, bars=len(history)
+            "Auto evaluation loop sleeping for {seconds} seconds before restarting...".format(
+                seconds=max(1, sleep_interval)
             )
         )
-        ready_combos.append((ticker, period_choice))
-
-    if not ready_combos:
-        print("Could not fetch history for any tracked ticker/period pair.")
-        return
-
-    for ticker, period_choice in ready_combos:
-        run_forecast_workflow(
-            ticker=ticker,
-            period_choice=period_choice,
-            pause=False,
-            quiet=True,
-        )
-
-    run_training_workflow(pause=False, loop=False, periods=track_periods)
-    run_review_workflow(pause=False, limit=review_limit)
+        try:
+            time.sleep(max(1, sleep_interval))
+        except KeyboardInterrupt:
+            log("Auto evaluation loop interrupted; exiting after current pass.")
+            break
 
 
 # =============================================================
@@ -2117,11 +2227,27 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=60,
         help="Seconds to sleep between training loop iterations when --auto-train is set.",
     )
+    parser.add_argument(
+        "--auto-eval-loop",
+        action="store_true",
+        help="Continuously run the auto-evaluation workflow instead of a single pass.",
+    )
+    parser.add_argument(
+        "--eval-interval",
+        type=int,
+        default=300,
+        help="Seconds to sleep between auto-eval loop iterations when --auto-eval-loop is set.",
+    )
+    parser.add_argument(
+        "--max-tickers",
+        type=int,
+        help="Limit the number of tickers processed per auto-eval pass (use all by default).",
+    )
     parser.add_argument("--ticker", help="Ticker symbol for automated runs.")
     parser.add_argument(
         "--period",
         choices=sorted(INTERVAL_MAP.keys()),
-        help="Data period: hour, day, week, month, quarter, or year.",
+        help="Data period: hour, day, week, month, or quarter.",
     )
     parser.add_argument("--horizon", type=int, help="Forecast horizon in bars.")
     parser.add_argument("--bars", type=int, help="Override number of historical bars to fetch.")
@@ -2183,7 +2309,12 @@ def dispatch_cli_action(args) -> None:
             pause=False,
         )
     elif action == "auto-eval":
-        run_auto_evaluation_workflow(review_limit=args.review_limit)
+        run_auto_evaluation_workflow(
+            review_limit=args.review_limit,
+            loop=args.auto_eval_loop,
+            sleep_interval=args.eval_interval,
+            max_tickers=args.max_tickers,
+        )
     elif action == "review":
         run_review_workflow(
             pause=False,
