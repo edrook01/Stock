@@ -237,6 +237,32 @@ def discover_tracked_tickers() -> List[str]:
     return DEFAULT_TICKERS.copy()
 
 
+def select_ticker_with_history(
+    primary: str, period_choice: str, bars_back: int = 600
+):
+    """Return the first ticker that produces price history.
+
+    This is primarily used for quiet/automated workflows so we can gracefully
+    fall back to another tracked symbol (or one of the defaults) when a ticker
+    has been delisted or otherwise has no data. The primary ticker is excluded
+    from retries because the caller will already have tried it.
+    """
+
+    seen = {primary.strip().upper()}
+    candidates = discover_tracked_tickers() + DEFAULT_TICKERS
+
+    for candidate in candidates:
+        candidate = str(candidate).strip().upper()
+        if not candidate or candidate in seen:
+            continue
+        seen.add(candidate)
+        df = fetch_history(candidate, period_choice, bars_back=bars_back)
+        if df is not None and not df.empty:
+            return candidate, df
+
+    return primary, None
+
+
 def default_horizon_for_period(period_choice: str) -> int:
     period_choice = (period_choice or "day").lower()
     if period_choice == "hour":
@@ -1198,6 +1224,15 @@ def run_forecast_workflow(
         )
         band = max(0.5, band)
         df = fetch_history(ticker, period_choice, bars_back=600)
+        if (df is None or df.empty) and (quiet or not interactive):
+            original = ticker
+            ticker, df = select_ticker_with_history(
+                ticker, period_choice, bars_back=600
+            )
+            if df is not None and not df.empty and ticker != original:
+                log(
+                    f"Auto-switched to {ticker} after {original} returned no price data."
+                )
         if df is None or df.empty:
             print("No data downloaded.")
             return
