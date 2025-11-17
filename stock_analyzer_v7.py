@@ -1067,6 +1067,9 @@ def run_sma_report(
     pause: bool = True,
 ) -> None:
     print("\n=== SMA 20 + 50 Report ===\n")
+    if pd is None:
+        print("pandas unavailable; run bootstrap first.")
+        return
     ticker = (
         ticker
         or guided_prompt(
@@ -1093,21 +1096,91 @@ def run_sma_report(
         return
     df = compute_indicators(df)
     latest = df.iloc[-1]
-    rows = [
-        ["Close", f"{latest['Close']:.2f}"],
-        ["SMA20", f"{latest['SMA20']:.2f}"],
-        ["SMA50", f"{latest['SMA50']:.2f}"],
-        ["SMA200", f"{latest['SMA200']:.2f}"],
-        ["RSI14", f"{latest['RSI14']:.2f}"],
-        ["MACD", f"{latest['MACD']:.2f}"],
-        ["ATR14", f"{latest['ATR14']:.2f}"],
+    previous = df.iloc[-2] if len(df) > 1 else latest
+
+    def _pct_diff(value: float, reference: float) -> Optional[float]:
+        if reference is None or reference == 0 or pd.isna(reference):
+            return None
+        return ((value - reference) / reference) * 100
+
+    def _fmt(value: Optional[float], decimals: int = 2) -> str:
+        if value is None or pd.isna(value):
+            return "-"
+        return f"{value:.{decimals}f}"
+
+    close = float(latest["Close"])
+    sma20 = float(latest.get("SMA20", float("nan")))
+    sma50 = float(latest.get("SMA50", float("nan")))
+    sma200 = float(latest.get("SMA200", float("nan")))
+    rsi14 = float(latest.get("RSI14", float("nan")))
+    macd = float(latest.get("MACD", float("nan")))
+    atr14 = float(latest.get("ATR14", float("nan")))
+
+    pct_to_close = [
+        ["SMA20", _pct_diff(close, sma20)],
+        ["SMA50", _pct_diff(close, sma50)],
+        ["SMA200", _pct_diff(close, sma200)],
     ]
+
+    rows = [
+        ["Close", _fmt(close), "-", "-"],
+        ["SMA20", _fmt(sma20), _fmt(pct_to_close[0][1]), _fmt(sma20 - float(previous.get("SMA20", sma20)))],
+        ["SMA50", _fmt(sma50), _fmt(pct_to_close[1][1]), _fmt(sma50 - float(previous.get("SMA50", sma50)))],
+        ["SMA200", _fmt(sma200), _fmt(pct_to_close[2][1]), _fmt(sma200 - float(previous.get("SMA200", sma200)))],
+        ["RSI14", _fmt(rsi14), "-", "-"],
+        ["MACD", _fmt(macd), "-", _fmt(macd - float(previous.get("MACD", macd)))],
+        ["ATR14", _fmt(atr14), _fmt(_pct_diff(atr14, close)), "-"],
+    ]
+
+    headers = ["Metric", "Value", "% vs Close", "1-bar Δ"]
     if tabulate_mod:
-        print(tabulate_mod.tabulate(rows, tablefmt="github"))
+        print(tabulate_mod.tabulate(rows, headers=headers, tablefmt="github"))
     else:
-        for key, value in rows:
-            print(f"{key:>8}: {value}")
+        print(headers)
+        for row in rows:
+            print(" | ".join(f"{cell}" for cell in row))
+
+    insights: List[str] = []
+
+    stacked = [sma20, sma50, sma200]
+    if all(pd.notna(val) for val in stacked):
+        if sma20 > sma50 > sma200:
+            insights.append("MAs stacked bullish (20 > 50 > 200) – trend support.")
+        elif sma20 < sma50 < sma200:
+            insights.append("MAs stacked bearish (20 < 50 < 200) – downward pressure.")
+        else:
+            insights.append("Mixed MA stack – watch for upcoming crossovers.")
+
+    if pd.notna(macd) and pd.notna(latest.get("MACD_SIGNAL")):
+        macd_signal = float(latest["MACD_SIGNAL"])
+        macd_state = "above" if macd >= macd_signal else "below"
+        insights.append(f"MACD is {macd_state} signal (momentum gauge).")
+
+    if pd.notna(rsi14):
+        if rsi14 >= 70:
+            insights.append(f"RSI at {rsi14:.1f} → overbought risk zone.")
+        elif rsi14 <= 30:
+            insights.append(f"RSI at {rsi14:.1f} → oversold potential rebound.")
+
+    recent_span = df.tail(60)
+    if not recent_span.empty:
+        swing_high = float(recent_span["High"].max())
+        swing_low = float(recent_span["Low"].min())
+        if swing_high and close:
+            dist_high = _pct_diff(close, swing_high)
+            insights.append(f"Next resistance near {swing_high:.2f} ({_fmt(dist_high)}% from close).")
+        if swing_low and close:
+            dist_low = _pct_diff(close, swing_low)
+            insights.append(f"Nearest support near {swing_low:.2f} ({_fmt(dist_low)}% from close).")
+
+    if pd.notna(atr14) and atr14 > 0:
+        atr_pct = _pct_diff(atr14, close)
+        insights.append(
+            f"ATR14 suggests ~{atr14:.2f} daily move ({_fmt(atr_pct)}% of price) – set stops/targets accordingly."
+        )
+
     print()
+    print_panel("Snapshot", insights or ["No additional signals available."])
     maybe_pause(pause)
 
 
