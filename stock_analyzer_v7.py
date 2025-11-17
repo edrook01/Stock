@@ -11,7 +11,9 @@ debug on fresh machines.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import csv
+import io
 import math
 import os
 import sys
@@ -831,15 +833,68 @@ def analyst_consensus_engine(ticker: str, last_close: float) -> Optional[EngineR
         except Exception:
             return None
 
-    info = None
-    try:
-        info = yfinance.Ticker(ticker).get_info()
-    except Exception:
-        try:
-            info = yfinance.Ticker(ticker).info
-        except Exception:
-            return None
+    def _probe_quote_summary() -> Dict:
+        """Try direct Yahoo Finance quoteSummary endpoints to recover from 404s.
 
+        yfinance occasionally ships outdated endpoints. When that happens we
+        opportunistically scan known base URLs (query2/query1/fc) for a working
+        quoteSummary response so the caller still gets analyst targets without
+        needing a manual code update.
+        """
+
+        if requests_mod is None:
+            return {}
+
+        modules = ["financialData", "defaultKeyStatistics", "price"]
+        base_urls = [
+            "https://query2.finance.yahoo.com",
+            "https://query1.finance.yahoo.com",
+            "https://fc.yahoo.com",
+        ]
+
+        for base in base_urls:
+            try:
+                response = requests_mod.get(
+                    f"{base}/v7/finance/quoteSummary/{ticker}",
+                    params={"modules": ",".join(modules)},
+                    timeout=8,
+                )
+                if response.status_code == 404:
+                    continue
+                response.raise_for_status()
+                payload = response.json() or {}
+                result = (
+                    payload.get("quoteSummary", {}).get("result") or []
+                )
+                if not result:
+                    continue
+                merged: Dict = {"_source_url": response.url}
+                for module_payload in result[0].values():
+                    if isinstance(module_payload, dict):
+                        merged.update(module_payload)
+                return merged
+            except Exception:
+                continue
+
+        return {}
+
+    def _fetch_info_safely() -> Dict:
+        try:
+            ticker_obj = yfinance.Ticker(ticker)
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(
+                io.StringIO()
+            ):
+                return ticker_obj.get_info()
+        except Exception:
+            try:
+                with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(
+                    io.StringIO()
+                ):
+                    return yfinance.Ticker(ticker).info
+            except Exception:
+                return _probe_quote_summary()
+
+    info = _fetch_info_safely() or _probe_quote_summary()
     if not info:
         return None
 
@@ -851,6 +906,23 @@ def analyst_consensus_engine(ticker: str, last_close: float) -> Optional[EngineR
     fallback_price = _coerce(info.get("currentPrice")) or _coerce(
         info.get("regularMarketPrice")
     )
+    if fallback_price is None:
+        try:
+            fast_info = yfinance.Ticker(ticker).fast_info  # type: ignore[attr-defined]
+            if isinstance(fast_info, dict):
+                fallback_price = _coerce(
+                    fast_info.get("last_price")
+                    or fast_info.get("lastPrice")
+                    or fast_info.get("regularMarketPrice")
+                )
+            else:
+                fallback_price = _coerce(
+                    getattr(fast_info, "last_price", None)
+                    or getattr(fast_info, "lastPrice", None)
+                    or getattr(fast_info, "regularMarketPrice", None)
+                )
+        except Exception:
+            fallback_price = None
     prediction = target_mean or (
         (target_high and target_low and (target_high + target_low) / 2)
     ) or fallback_price or last_close
