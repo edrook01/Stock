@@ -16,6 +16,7 @@ import os
 import sys
 import subprocess
 import importlib
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Dict, Iterable, List, Optional, Tuple
@@ -33,6 +34,7 @@ sys.path.insert(0, LIB_DIR)
 
 MEM_FILE = os.path.join(MEM_DIR, "predictions_log.csv")
 DEFAULT_BAND_PERCENT = 5.0
+DEFAULT_TICKERS = ["SPY", "AAPL", "MSFT", "TSLA", "NVDA"]
 
 
 # =============================================================
@@ -137,7 +139,7 @@ def safe_import(name: str):  # type: ignore[override]
         return None
 
 
-def bootstrap() -> None:
+def bootstrap(clear_after: bool = False) -> None:
     log("Bootstrapping...")
     install_packages_local()
 
@@ -160,7 +162,8 @@ def bootstrap() -> None:
         sys.exit(1)
 
     log("Bootstrap complete.\n")
-    clear_screen()
+    if clear_after:
+        clear_screen()
 
 
 # =============================================================
@@ -183,6 +186,10 @@ def prompt(message: str, default: Optional[str] = None) -> str:
     return default or ""
 
 
+def is_interactive() -> bool:
+    return sys.stdin.isatty()
+
+
 def safe_int(value: Optional[str], fallback: int) -> int:
     try:
         return int(str(value))
@@ -199,9 +206,10 @@ def maybe_pause(pause: bool, message: str = "Press Enter to return to the menu..
         pass
 
 
-def finalize_section(pause: bool) -> None:
+def finalize_section(pause: bool, clear: bool = False) -> None:
     maybe_pause(pause)
-    clear_screen()
+    if clear:
+        clear_screen()
 
 
 def ensure_memory_file() -> None:
@@ -215,6 +223,27 @@ def safe_float(value: Optional[str], fallback: float) -> float:
         return float(str(value))
     except Exception:
         return fallback
+
+
+def discover_tracked_tickers() -> List[str]:
+    ensure_memory_file()
+    try:
+        df = pd.read_csv(MEM_FILE)
+        tracked = sorted([t for t in df["ticker"].dropna().unique() if isinstance(t, str) and t.strip()])
+        if tracked:
+            return tracked
+    except Exception:
+        pass
+    return DEFAULT_TICKERS.copy()
+
+
+def default_horizon_for_period(period_choice: str) -> int:
+    period_choice = (period_choice or "day").lower()
+    if period_choice == "hour":
+        return 6
+    if period_choice == "week":
+        return 1
+    return 3
 
 
 def append_prediction_record(
@@ -252,7 +281,11 @@ def _fetch_actual_price(ticker: str, target_time: datetime) -> Optional[float]:
         return None
 
 
-def update_memory_accuracy_for_ticker(ticker: str) -> Dict[str, float]:
+def update_memory_accuracy_for_ticker(
+    ticker: str,
+    period: Optional[str] = None,
+    return_update_flag: bool = False,
+) -> Dict[str, float] | Tuple[Dict[str, float], bool]:
     ensure_memory_file()
     try:
         df = pd.read_csv(MEM_FILE)
@@ -263,8 +296,10 @@ def update_memory_accuracy_for_ticker(ticker: str) -> Dict[str, float]:
         return {}
 
     df_ticker = df[df["ticker"] == ticker].copy()
+    if period:
+        df_ticker = df_ticker[df_ticker["period"] == period]
     if df_ticker.empty:
-        return {}
+        return ({}, False) if return_update_flag else {}
 
     updated = False
     now = datetime.now()
@@ -292,11 +327,16 @@ def update_memory_accuracy_for_ticker(ticker: str) -> Dict[str, float]:
 
     grouped = df_ticker.dropna(subset=["pct_error"])
     if grouped.empty:
-        return {}
+        return ({}, updated) if return_update_flag else {}
 
-    return (
+    accuracy = (
         grouped.groupby("engine")["pct_error"].mean().to_dict()
     )  # type: ignore[return-value]
+
+    if return_update_flag:
+        return accuracy, updated
+
+    return accuracy
 
 
 # =============================================================
@@ -1099,48 +1139,55 @@ def run_forecast_workflow(
     horizon: Optional[int] = None,
     band: Optional[float] = None,
     pause: bool = True,
+    quiet: bool = False,
 ) -> None:
     try:
-        print("\n=== Forecast (Technical + ML + NN) ===\n")
-        ticker = (
-            ticker
-            or guided_prompt(
-                "Ticker symbol",
-                "Specify one uppercase ticker to run the combined forecast.",
-                "NVDA",
-            )
-        ).strip().upper()
+        if not quiet:
+            print("\n=== Forecast (Technical + ML + NN) ===\n")
+
+        interactive = is_interactive()
+
+        if ticker is None:
+            if quiet or not interactive:
+                ticker = discover_tracked_tickers()[0]
+                log(f"Auto-filled ticker: {ticker}")
+            else:
+                ticker = guided_prompt(
+                    "Ticker symbol",
+                    "Specify one uppercase ticker to run the combined forecast.",
+                    discover_tracked_tickers()[0],
+                )
+            ticker = ticker.strip().upper()
         if not ticker:
             print("Ticker required.")
             return
-        period_choice = (
-            period_choice
-            or guided_prompt(
-                "Period",
-                "Choose the candle size: hour, day, or week.",
-                "hour",
-                "day",
-            )
-        ).strip().lower() or "day"
+
+        if period_choice is None:
+            if quiet or not interactive:
+                period_choice = "day"
+            else:
+                period_choice = guided_prompt(
+                    "Period",
+                    "Choose the candle size: hour, day, or week.",
+                    "hour",
+                    "day",
+                )
+        period_choice = period_choice.strip().lower() or "day"
+
         horizon = (
             horizon
             if horizon is not None
-            else safe_int(
-                guided_prompt(
-                    "Forecast horizon in bars",
-                    "Enter a positive integer showing how many candles to project.",
-                    "5",
-                    "5",
-                ),
-                5,
-            )
+            else default_horizon_for_period(period_choice)
         )
         horizon = max(1, horizon)
+
         band = (
             band
             if band is not None
             else safe_float(
-                guided_prompt(
+                DEFAULT_BAND_PERCENT
+                if quiet or not interactive
+                else guided_prompt(
                     "+/- band for probability (%)",
                     "Set the percentage band to estimate hit probability around each target.",
                     f"{DEFAULT_BAND_PERCENT:.1f}",
@@ -1160,7 +1207,7 @@ def run_forecast_workflow(
         horizon_days = max(1, math.ceil(horizon / 6)) if period_choice == "hour" else max(1, horizon)
         news_context = collect_news_context(ticker, horizon_days=horizon_days)
         history_accuracy = update_memory_accuracy_for_ticker(ticker)
-        if history_accuracy:
+        if history_accuracy and not quiet:
             print("Historical MAPE by engine (lower is better):")
             for engine, mape in history_accuracy.items():
                 print(f"  - {engine}: {mape:.2f}%")
@@ -1188,99 +1235,155 @@ def run_forecast_workflow(
             print("No engine produced a forecast.")
             return
 
-        print(format_prediction_table(results, last_close))
-        print(
-            f"Probabilities reflect the chance of landing within ±{band:.1f}% of each target using recent volatility."
-        )
-        print()
-        sources = news_context.get("sources", []) if isinstance(news_context, dict) else []
-        if sources:
-            print("News sources factored into the forecast:")
-            for src in sources:
-                published = src.get("published")
-                ts = published.strftime("%Y-%m-%d %H:%M") if hasattr(published, "strftime") else "n/a"
-                sentiment_note = f"sentiment {src.get('sentiment', 0):+d}"
-                link = src.get("link") or ""
-                link_note = f" → {link}" if link else ""
-                print(f"  - {src.get('publisher', 'unknown')} ({ts}): {src.get('title', '').strip()} [{sentiment_note}]{link_note}")
+        if quiet:
+            log(
+                f"Recorded {len(results)} forecasts for {ticker} ({period_choice}) with horizon {horizon} bars."
+            )
         else:
-            print("No recent headlines were available for news weighting.")
-        print()
+            print(format_prediction_table(results, last_close))
+            print(
+                f"Probabilities reflect the chance of landing within ±{band:.1f}% of each target using recent volatility."
+            )
+            print()
+            sources = news_context.get("sources", []) if isinstance(news_context, dict) else []
+            if sources:
+                print("News sources factored into the forecast:")
+                for src in sources:
+                    published = src.get("published")
+                    ts = published.strftime("%Y-%m-%d %H:%M") if hasattr(published, "strftime") else "n/a"
+                    sentiment_note = f"sentiment {src.get('sentiment', 0):+d}"
+                    link = src.get("link") or ""
+                    link_note = f" → {link}" if link else ""
+                    print(f"  - {src.get('publisher', 'unknown')} ({ts}): {src.get('title', '').strip()} [{sentiment_note}]{link_note}")
+            else:
+                print("No recent headlines were available for news weighting.")
+            print()
     finally:
-        finalize_section(pause)
+        finalize_section(pause, clear=False)
 
 
-def run_training_workflow(pause: bool = True, loop: bool = False) -> None:
-    def execute_training_pass() -> None:
+def run_training_workflow(
+    pause: bool = True,
+    loop: bool = False,
+    periods: Optional[List[str]] = None,
+) -> None:
+    track_periods = periods or list(INTERVAL_MAP.keys())
+
+    def execute_training_pass() -> Tuple[List[Tuple[str, str]], bool]:
         print("\n=== Training / Self-Evaluation ===\n")
         ensure_memory_file()
         try:
             df = pd.read_csv(MEM_FILE)
         except Exception as exc:
             print(f"Could not load memory file: {exc}")
-            return
+            default_combos = [(ticker, period) for ticker in discover_tracked_tickers() for period in track_periods]
+            return default_combos, False
 
-        if df.empty:
-            print("No prediction history found. Run forecasts to generate training data.")
-            return
-
-        tickers = sorted(df["ticker"].dropna().unique())
-        completed = int(df["actual_price"].notna().sum())
-        pending = int(len(df) - completed)
-
-        print(
-            "Found {rows} prediction records across {tickers} tracked tickers.".format(
-                rows=len(df), tickers=len(tickers)
-            )
+        combos = (
+            df[["ticker", "period"]]
+            .dropna()
+            .drop_duplicates()
+            .apply(lambda row: (str(row["ticker"]).strip(), str(row["period"]).strip()), axis=1)
+            .tolist()
         )
-        print(f"Completed predictions with actual prices: {completed}")
-        print(f"Pending predictions awaiting actual prices: {pending}")
 
-        per_ticker_accuracy: Dict[str, Dict[str, float]] = {}
-        global_accuracy: Dict[str, List[float]] = {}
+        if not combos:
+            combos = [(ticker, period) for ticker in discover_tracked_tickers() for period in track_periods]
 
-        for ticker in tickers:
-            accuracy = update_memory_accuracy_for_ticker(ticker)
-            if not accuracy:
-                continue
-            per_ticker_accuracy[ticker] = accuracy
-            for engine, mape in accuracy.items():
-                global_accuracy.setdefault(engine, []).append(mape)
-
-        if per_ticker_accuracy:
-            print("\nUpdated MAPE (by ticker and engine):")
-            for ticker, scores in per_ticker_accuracy.items():
-                parts = ", ".join(f"{engine}: {mape:.2f}%" for engine, mape in scores.items())
-                print(f"  - {ticker}: {parts}")
+        updates_made = False
+        if df.empty:
+            print("No prediction history found. Running live forecasts for tracked tickers.")
         else:
-            print("\nNo tickers have evaluable targets yet; waiting for target times to elapse.")
+            completed = int(df["actual_price"].notna().sum())
+            pending = int(len(df) - completed)
 
-        if global_accuracy:
-            print("\nAverage MAPE across all tracked tickers:")
-            for engine, values in global_accuracy.items():
-                avg_mape = sum(values) / len(values)
-                print(f"  - {engine}: {avg_mape:.2f}% (n={len(values)})")
+            print(
+                "Found {rows} prediction records across {tickers} tracked ticker/period pairs.".format(
+                    rows=len(df), tickers=len(combos)
+                )
+            )
+            print(f"Completed predictions with actual prices: {completed}")
+            print(f"Pending predictions awaiting actual prices: {pending}")
+
+            per_combo_accuracy: Dict[Tuple[str, str], Dict[str, float]] = {}
+            global_accuracy: Dict[str, List[float]] = {}
+
+            for ticker, period_choice in combos:
+                accuracy_result = update_memory_accuracy_for_ticker(
+                    ticker,
+                    period=period_choice,
+                    return_update_flag=True,
+                )
+                if isinstance(accuracy_result, tuple):
+                    accuracy, updated = accuracy_result
+                    updates_made = updates_made or updated
+                else:
+                    accuracy = accuracy_result
+                if not accuracy:
+                    continue
+                per_combo_accuracy[(ticker, period_choice)] = accuracy
+                for engine, mape in accuracy.items():
+                    global_accuracy.setdefault(engine, []).append(mape)
+
+            if per_combo_accuracy:
+                print("\nUpdated MAPE (by ticker, period, and engine):")
+                for (ticker, period_choice), scores in sorted(per_combo_accuracy.items()):
+                    parts = ", ".join(f"{engine}: {mape:.2f}%" for engine, mape in scores.items())
+                    print(f"  - {ticker} [{period_choice}]: {parts}")
+            else:
+                print("\nNo tickers have evaluable targets yet; waiting for target times to elapse.")
+
+            if global_accuracy:
+                print("\nAverage MAPE across all tracked tickers:")
+                for engine, values in global_accuracy.items():
+                    avg_mape = sum(values) / len(values)
+                    print(f"  - {engine}: {avg_mape:.2f}% (n={len(values)})")
+
+            pending_by_combo = {
+                (ticker, period_choice): int(
+                    df[
+                        (df["ticker"] == ticker)
+                        & (df["period"] == period_choice)
+                        & (df["actual_price"].isna())
+                    ].shape[0]
+                )
+                for ticker, period_choice in combos
+            }
+            if pending_by_combo:
+                print("\nPending prediction targets still waiting for actual prices:")
+                for (ticker, period_choice), pending_count in sorted(pending_by_combo.items()):
+                    print(f"  - {ticker} [{period_choice}]: {pending_count} pending")
+
+        return combos, updates_made
+
+    def run_live_forecasts(combos: List[Tuple[str, str]]) -> None:
+        print("\n=== Live forecast refresh (auto-filled tickers) ===\n")
+        for ticker, period in combos:
+            try:
+                run_forecast_workflow(
+                    ticker=ticker,
+                    period_choice=period,
+                    horizon=default_horizon_for_period(period),
+                    band=DEFAULT_BAND_PERCENT,
+                    pause=False,
+                    quiet=True,
+                )
+            except Exception as exc:
+                log(f"Live forecast failed for {ticker} ({period}): {exc}")
 
     try:
         while True:
-            execute_training_pass()
+            combos, updates = execute_training_pass()
+            if combos:
+                run_live_forecasts(combos)
             if not loop:
                 break
-
-            print(
-                "\nTraining loop controls: [Enter] rerun training, [P] forecast now, [M] return to menu, [Q] quit"
-            )
-            selection = input("Selection: ").strip().lower()
-            if selection in {"m", "menu"}:
-                break
-            if selection in {"q", "quit"}:
-                sys.exit(0)
-            if selection in {"p", "predict", "forecast"}:
-                run_forecast_workflow(pause=False)
-                continue
-            # Any other input (including Enter) simply reruns the training pass
+            if updates:
+                log("New actual prices were captured; refreshing metrics before the next loop pass...")
+            log("Training loop active; sleeping 60 seconds before the next refresh...")
+            time.sleep(60)
     finally:
-        finalize_section(pause and not loop)
+        finalize_section(pause and not loop, clear=False)
 
 
 def run_help(pause: bool = True) -> None:
@@ -1443,7 +1546,7 @@ def main_menu():
         elif choice == "4":
             run_forecast_workflow()
         elif choice == "5":
-            run_training_workflow(loop=True)
+            run_training_workflow(loop=False)
         elif choice == "6":
             run_help()
         elif choice == "7":
