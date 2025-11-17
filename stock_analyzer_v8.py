@@ -67,6 +67,7 @@ PACKAGE_SPECS: Dict[str, Tuple[str, Optional[str]]] = {
 }
 
 yfinance = pd = np = ta_mod = pta = skl = requests_mod = tabulate_mod = torch_mod = plt_mod = None  # type: ignore[assignment]
+_INFO_CACHE: Dict[str, Dict] = {}
 
 
 def log(msg: str) -> None:
@@ -941,6 +942,15 @@ def analyst_consensus_engine(ticker: str, last_close: float) -> Optional[EngineR
 
         return {}
 
+    def _is_404_error(exc: Exception) -> bool:
+        response = getattr(exc, "response", None)
+        if response is not None and getattr(response, "status_code", None) == 404:
+            return True
+        status = getattr(exc, "status", None)
+        if status == 404:
+            return True
+        return "404" in str(exc)
+
     def _fetch_info_safely() -> Dict:
         try:
             ticker_obj = yfinance.Ticker(ticker)
@@ -948,16 +958,24 @@ def analyst_consensus_engine(ticker: str, last_close: float) -> Optional[EngineR
                 io.StringIO()
             ):
                 return ticker_obj.get_info()
-        except Exception:
+        except Exception as exc:
+            if _is_404_error(exc):
+                return {}
             try:
                 with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(
                     io.StringIO()
                 ):
                     return yfinance.Ticker(ticker).info
-            except Exception:
+            except Exception as exc_inner:
+                if _is_404_error(exc_inner):
+                    return {}
                 return _probe_quote_summary()
 
-    info = _fetch_info_safely() or _probe_quote_summary()
+    ticker_key = ticker.upper()
+    if ticker_key not in _INFO_CACHE:
+        _INFO_CACHE[ticker_key] = _fetch_info_safely() or _probe_quote_summary()
+
+    info = _INFO_CACHE.get(ticker_key, {})
     if not info:
         return None
 
