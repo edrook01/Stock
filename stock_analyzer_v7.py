@@ -17,6 +17,7 @@ import sys
 import subprocess
 import importlib
 import time
+import signal
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Dict, Iterable, List, Optional, Tuple
@@ -1266,8 +1267,15 @@ def run_training_workflow(
     pause: bool = True,
     loop: bool = False,
     periods: Optional[List[str]] = None,
+    sleep_interval: int = 60,
 ) -> None:
     track_periods = periods or list(INTERVAL_MAP.keys())
+    stop_requested = False
+
+    def handle_shutdown(signum, _frame):
+        nonlocal stop_requested
+        stop_requested = True
+        log(f"Signal {signum} received; finishing current training pass before exit...")
 
     def execute_training_pass() -> Tuple[List[Tuple[str, str]], bool]:
         print("\n=== Training / Self-Evaluation ===\n")
@@ -1371,18 +1379,38 @@ def run_training_workflow(
             except Exception as exc:
                 log(f"Live forecast failed for {ticker} ({period}): {exc}")
 
+    original_sigint = signal.getsignal(signal.SIGINT)
+    original_sigterm = signal.getsignal(signal.SIGTERM)
+    signal.signal(signal.SIGINT, handle_shutdown)
+    signal.signal(signal.SIGTERM, handle_shutdown)
+
     try:
         while True:
+            if stop_requested:
+                log("Stopping training loop before starting the next pass.")
+                break
             combos, updates = execute_training_pass()
             if combos:
                 run_live_forecasts(combos)
-            if not loop:
+            if not loop or stop_requested:
+                if stop_requested:
+                    log("Stopping training loop after completing the current pass.")
                 break
             if updates:
                 log("New actual prices were captured; refreshing metrics before the next loop pass...")
-            log("Training loop active; sleeping 60 seconds before the next refresh...")
-            time.sleep(60)
+            log(
+                "Training loop active; sleeping {seconds} seconds before the next refresh...".format(
+                    seconds=max(1, sleep_interval)
+                )
+            )
+            try:
+                time.sleep(max(1, sleep_interval))
+            except KeyboardInterrupt:
+                stop_requested = True
+                log("Keyboard interrupt received; preparing to exit training loop.")
     finally:
+        signal.signal(signal.SIGINT, original_sigint)
+        signal.signal(signal.SIGTERM, original_sigterm)
         finalize_section(pause and not loop, clear=False)
 
 
@@ -1410,6 +1438,11 @@ band around each target based on recent volatility.
 
 Use the menu self-test option or --action selftest to run the engines against
 a synthetic dataset without requiring network connectivity.
+
+Automation: --action train runs a single self-evaluation cycle by default.
+Pass --auto-train to keep it running in a loop, and adjust --train-interval
+to control how many seconds the workflow sleeps between cycles. The loop
+listens for SIGINT/SIGTERM so it can stop gracefully in unattended mode.
         """
     )
     maybe_pause(pause)
@@ -1583,6 +1616,17 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default="menu",
         help="Workflow to run (default: interactive menu)",
     )
+    parser.add_argument(
+        "--auto-train",
+        action="store_true",
+        help="Run the training workflow in a continuous loop instead of once.",
+    )
+    parser.add_argument(
+        "--train-interval",
+        type=int,
+        default=60,
+        help="Seconds to sleep between training loop iterations when --auto-train is set.",
+    )
     parser.add_argument("--ticker", help="Ticker symbol for automated runs.")
     parser.add_argument(
         "--period",
@@ -1637,7 +1681,11 @@ def dispatch_cli_action(args) -> None:
             pause=False,
         )
     elif action == "train":
-        run_training_workflow(pause=False)
+        run_training_workflow(
+            pause=False,
+            loop=args.auto_train,
+            sleep_interval=args.train_interval,
+        )
     elif action == "help":
         run_help(pause=False)
     elif action == "diagnostics":
