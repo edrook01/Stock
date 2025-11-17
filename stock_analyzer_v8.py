@@ -550,11 +550,10 @@ def default_bars_for_period(period_choice: str) -> Optional[int]:
     normalized = (period_choice or "day").lower()
     if normalized in LONG_PERIODS:
         return None
-    if normalized == "hour":
-        return 600
-    if normalized == "week":
-        return 2000
-    return 2000
+
+    # Pull the full dataset for predictions so models see as much context as the
+    # API provides for the chosen interval instead of trimming recent bars.
+    return None
 
 
 def fetch_history(ticker: str, period_choice: str, bars_back: Optional[int] = None):
