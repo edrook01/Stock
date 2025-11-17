@@ -107,8 +107,15 @@ def guided_prompt(
     return prompt(f"{label}{default_hint}: ", default)
 
 
-def install_packages_local() -> None:
+def install_packages_local(wheel_dir: Optional[str] = None) -> None:
     log("Checking dependencies...")
+
+    if wheel_dir:
+        if not os.path.isdir(wheel_dir):
+            log(f"!! Wheel directory not found: {wheel_dir}")
+            sys.exit(1)
+        log(f"Using local wheel/cache directory: {wheel_dir}")
+
     for import_name, (pip_name, version) in PACKAGE_SPECS.items():
         optional = import_name == "torch"
 
@@ -122,19 +129,22 @@ def install_packages_local() -> None:
         pkg_str = pip_name if version is None else f"{pip_name}=={version}"
 
         try:
-            subprocess.check_call(
-                [
-                    sys.executable,
-                    "-m",
-                    "pip",
-                    "install",
-                    pkg_str,
-                    "--target",
-                    LIB_DIR,
-                    "--upgrade",
-                    "--no-warn-script-location",
-                ]
-            )
+            command = [
+                sys.executable,
+                "-m",
+                "pip",
+                "install",
+                pkg_str,
+                "--target",
+                LIB_DIR,
+                "--upgrade",
+                "--no-warn-script-location",
+            ]
+
+            if wheel_dir:
+                command.extend(["--no-index", "--find-links", wheel_dir])
+
+            subprocess.check_call(command)
             log(f"✔ Installed {pkg_str}")
         except Exception as exc:  # pragma: no cover - runtime guard
             log(f"!! Failed: {exc}")
@@ -154,9 +164,14 @@ def safe_import(name: str):  # type: ignore[override]
         return None
 
 
-def bootstrap(clear_after: bool = False) -> None:
+def bootstrap(
+    *, install_deps: bool = False, wheel_dir: Optional[str] = None, clear_after: bool = False
+) -> None:
     log("Bootstrapping...")
-    install_packages_local()
+    if install_deps:
+        install_packages_local(wheel_dir=wheel_dir)
+    else:
+        log("Skipping dependency installation (use --install-deps to provision packages).")
 
     global yfinance, pd, np, ta_mod, pta, skl
     global requests_mod, tabulate_mod, torch_mod, plt_mod
@@ -173,7 +188,10 @@ def bootstrap(clear_after: bool = False) -> None:
     plt_mod = safe_import("matplotlib.pyplot")
 
     if yfinance is None or pd is None or np is None:
-        print("Critical imports failed. Exiting.")
+        print(
+            "Critical imports failed. Run with --install-deps (and optionally --wheel-dir) "
+            "to provision dependencies. Exiting."
+        )
         sys.exit(1)
 
     log("Bootstrap complete.\n")
@@ -2369,6 +2387,16 @@ def build_arg_parser() -> argparse.ArgumentParser:
         dest="review_export",
         help="Optional path to export filtered prediction history when using --action review.",
     )
+    parser.add_argument(
+        "--install-deps",
+        action="store_true",
+        help="Install/update dependencies before running (skipped by default).",
+    )
+    parser.add_argument(
+        "--wheel-dir",
+        dest="wheel_dir",
+        help="Path to a local wheel/cache directory to use with --install-deps.",
+    )
     return parser
 
 
@@ -2437,7 +2465,7 @@ def dispatch_cli_action(args) -> None:
 def main(argv: Optional[List[str]] = None) -> None:
     parser = build_arg_parser()
     args = parser.parse_args(argv)
-    bootstrap()
+    bootstrap(install_deps=args.install_deps, wheel_dir=args.wheel_dir)
     dispatch_cli_action(args)
 
 

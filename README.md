@@ -9,6 +9,19 @@ self-training loop into a single executable script.
 python3 stock_analyzer_v8.py --action menu
 ```
 
+## Dependency setup
+
+Dependencies are no longer installed automatically during bootstrap. Run the
+setup flag once to provision them, optionally pointing to a local wheel/cache
+directory to avoid network access:
+
+```bash
+python3 stock_analyzer_v8.py --install-deps
+
+# Use pre-downloaded wheels/caches instead of the network
+python3 stock_analyzer_v8.py --install-deps --wheel-dir ./wheels
+```
+
 ## Automated training
 
 The training workflow can run once or continuously:
