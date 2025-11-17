@@ -853,6 +853,76 @@ def collect_news_context(
     return context
 
 
+def _score_publisher_reliability(publisher: str) -> float:
+    trusted = {
+        "reuters",
+        "bloomberg",
+        "financial times",
+        "wall street journal",
+        "wsj",
+        "cnbc",
+    }
+    low_trust = {"reddit", "seekingalpha", "yahoo finance rumor", "unknown"}
+
+    norm = publisher.lower()
+    if norm in trusted:
+        return 0.85
+    if norm in low_trust:
+        return 0.35
+    return 0.55
+
+
+def evaluate_news_quality(news_context: Dict[str, object]) -> Dict[str, float]:
+    """Summarize reliability/value of news for downstream learning models."""
+
+    headline_count = int(news_context.get("headline_count", 0) or 0)
+    sentiment = int(news_context.get("sentiment", 0) or 0)
+    sources = news_context.get("sources", []) if isinstance(news_context, dict) else []
+    upcoming_events = news_context.get("upcoming_events", [])
+
+    if not isinstance(sources, list):
+        sources = []
+
+    if headline_count == 0:
+        return {
+            "reliability": 0.5,
+            "value": 0.0,
+            "sentiment_strength": 0.0,
+        }
+
+    unique_publishers = {
+        (src.get("publisher") or "unknown").lower() for src in sources if isinstance(src, dict)
+    }
+    recency_bonus = 0.0
+    for src in sources:
+        published = src.get("published")
+        if hasattr(published, "timestamp"):
+            age_days = max(0.0, (datetime.now() - published).total_seconds() / 86400)
+            recency_bonus += max(0.0, 1.5 - age_days * 0.25)
+
+    reliability_scores = [
+        _score_publisher_reliability((src.get("publisher") or "unknown"))
+        for src in sources
+        if isinstance(src, dict)
+    ]
+    avg_reliability = sum(reliability_scores) / len(reliability_scores) if reliability_scores else 0.5
+    reliability = max(0.2, min(1.0, avg_reliability + 0.05 * len(unique_publishers) + 0.05 * recency_bonus))
+
+    sentiment_strength = min(3.0, abs(sentiment) / max(1.0, headline_count))
+    event_bonus = 0.3 * len(upcoming_events) if isinstance(upcoming_events, list) else 0.0
+    diversity_bonus = 0.1 * len(unique_publishers)
+    value = max(
+        0.0,
+        min(1.0, 0.2 + 0.2 * sentiment_strength + event_bonus + diversity_bonus),
+    )
+
+    return {
+        "reliability": float(reliability),
+        "value": float(value),
+        "sentiment_strength": float(sentiment_strength),
+    }
+
+
 # =============================================================
 # FORECAST ENGINES
 # =============================================================
@@ -884,6 +954,11 @@ FEATURE_COLUMNS = [
     "Dist_SMA50",
     "Volatility20",
 ]
+
+# Tunable weight for how strongly the learning engine leans on news-derived
+# signals. Increase NEWS_INFLUENCE_WEIGHT to make sentiment/value adjustments
+# more pronounced; decrease to make the model more price/technical driven.
+NEWS_INFLUENCE_WEIGHT = float(os.environ.get("NEWS_INFLUENCE_WEIGHT", "0.35"))
 
 
 def technical_engine(df) -> Optional[EngineResult]:  # type: ignore[override]
@@ -1115,7 +1190,7 @@ def random_forest_engine(df) -> Optional[EngineResult]:  # type: ignore[override
     )
 
 
-def neural_network_engine(df) -> Optional[EngineResult]:  # type: ignore[override]
+def neural_network_engine(df, news_context: Optional[Dict[str, object]] = None) -> Optional[EngineResult]:  # type: ignore[override]
     df_feat = build_feature_frame(df)
     if len(df_feat) < 120:
         return None
@@ -1123,9 +1198,43 @@ def neural_network_engine(df) -> Optional[EngineResult]:  # type: ignore[overrid
     target = df_feat["Close"].shift(-1).dropna()
     features = df_feat.loc[target.index, FEATURE_COLUMNS]
 
+    base_result: Optional[EngineResult]
     if torch_mod is not None:
-        return _torch_lstm_engine(features, target)
-    return _mlp_engine(features, target)
+        base_result = _torch_lstm_engine(features, target)
+    else:
+        base_result = _mlp_engine(features, target)
+
+    if base_result is None:
+        return None
+
+    news_quality = evaluate_news_quality(news_context or {})
+    sentiment = int((news_context or {}).get("sentiment", 0) or 0)
+    headline_count = int((news_context or {}).get("headline_count", 0) or 0)
+    direction = math.tanh(sentiment / max(1.0, headline_count or 1)) if headline_count else 0.0
+
+    influence = NEWS_INFLUENCE_WEIGHT * news_quality["value"] * news_quality["reliability"]
+    news_modifier = direction * news_quality["sentiment_strength"] * influence
+    adjusted_prediction = base_result.prediction * (1 + news_modifier * 0.05)
+
+    confidence_boost = news_quality["reliability"] * news_quality["value"] * 1.5
+    adjusted_confidence = max(
+        1.0,
+        min(10.0, base_result.confidence + news_modifier + confidence_boost - (1 - news_quality["reliability"]))
+    )
+
+    news_comment = (
+        f"news adj {news_modifier:+.2f} (rel {news_quality['reliability']:.2f}, "
+        f"value {news_quality['value']:.2f}, sentiment {sentiment:+d})"
+    )
+    base_comment = base_result.comment.strip()
+    combined_comment = f"{base_comment}; {news_comment}" if base_comment else news_comment
+
+    return EngineResult(
+        engine=base_result.engine,
+        prediction=float(adjusted_prediction),
+        confidence=float(adjusted_confidence),
+        comment=combined_comment,
+    )
 
 
 def _torch_lstm_engine(features, target):  # type: ignore[override]
@@ -1699,7 +1808,7 @@ def run_forecast_workflow(
                     technical_engine(df),
                     analyst_consensus_engine(ticker, last_close),
                     random_forest_engine(df),
-                    neural_network_engine(df),
+                    neural_network_engine(df, news_context),
                     news_sentiment_engine(ticker, df, news_context),
                 ],
             ),
@@ -2171,7 +2280,7 @@ def run_self_test(pause: bool = True) -> None:
             [
                 technical_engine(df),
                 random_forest_engine(df),
-                neural_network_engine(df),
+                neural_network_engine(df, offline_news),
                 news_sentiment_engine("TEST", df, offline_news),
             ],
         )
