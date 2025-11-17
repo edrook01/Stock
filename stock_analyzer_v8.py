@@ -42,6 +42,7 @@ sys.path.insert(0, LIB_DIR)
 
 MEM_FILE = os.path.join(MEM_DIR, "predictions_log.csv")
 DEFAULT_BAND_PERCENT = 5.0
+MIN_CONFIDENCE_SATISFACTION = 8.5
 DEFAULT_TICKERS = ["SPY", "AAPL", "MSFT", "TSLA", "NVDA"]
 DEFAULT_TICKER_CSV = os.environ.get(
     "TICKER_UNIVERSE_CSV", os.path.join(DATA_DIR, "trading212_listings.csv")
@@ -1233,6 +1234,28 @@ def estimate_band_probability(volatility: float, horizon: int, band_percent: flo
     return max(0.0, min(1.0, prob))
 
 
+def evaluate_confidence_satisfaction(
+    results: Iterable[EngineResult], threshold: float
+) -> Tuple[List[EngineResult], List[str]]:
+    satisfied: List[EngineResult] = []
+    reasons: List[str] = []
+
+    for res in results:
+        if res.confidence >= threshold:
+            satisfied.append(res)
+            continue
+
+        detail = res.comment.strip() if res.comment else "Signals were mixed or insufficient to support a higher confidence score."
+        reasons.append(
+            (
+                f"{res.engine} is below the {threshold:.1f}/10 requirement with "
+                f"{res.confidence:.1f}/10 – {detail}"
+            )
+        )
+
+    return satisfied, reasons
+
+
 def consolidate_predictions(
     ticker: str,
     period: str,
@@ -1646,16 +1669,51 @@ def run_forecast_workflow(
             print("No engine produced a forecast.")
             return
 
+        satisfied, low_confidence_reasons = evaluate_confidence_satisfaction(
+            results, MIN_CONFIDENCE_SATISFACTION
+        )
+
         if quiet:
             log(
                 f"Recorded {len(results)} forecasts for {ticker} ({period_choice}) with horizon {horizon} bars."
             )
+            if satisfied:
+                log(
+                    "Confidence satisfaction reached for: "
+                    + ", ".join(res.engine for res in satisfied)
+                )
+            else:
+                log(
+                    f"No engines met the {MIN_CONFIDENCE_SATISFACTION:.1f}/10 confidence satisfaction threshold."
+                )
+
+            for reason in low_confidence_reasons:
+                log(f"Low confidence: {reason}")
+
         else:
             print(format_prediction_table(results, last_close))
             print(
                 f"Probabilities reflect the chance of landing within ±{band:.1f}% of each target using recent volatility."
             )
             print()
+
+            print(
+                f"Satisfaction threshold: {MIN_CONFIDENCE_SATISFACTION:.1f}/10 (only predictions at or above this are considered reliable)."
+            )
+            if satisfied:
+                print(
+                    "Engines meeting the satisfaction bar: "
+                    + ", ".join(res.engine for res in satisfied)
+                )
+            else:
+                print("No engines met the satisfaction bar this run.")
+
+            if low_confidence_reasons:
+                print("Confidence shortfalls and reasons:")
+                for reason in low_confidence_reasons:
+                    print(f"  - {reason}")
+            print()
+
             sources = news_context.get("sources", []) if isinstance(news_context, dict) else []
             if sources:
                 print("News sources factored into the forecast:")
