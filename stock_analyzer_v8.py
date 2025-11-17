@@ -268,9 +268,41 @@ def finalize_section(pause: bool, clear: bool = False) -> None:
 
 
 def ensure_memory_file() -> None:
+    ensure_directories()
     if not os.path.exists(MEM_FILE):
         with open(MEM_FILE, "w", encoding="utf-8") as handle:
             handle.write(HEADER)
+
+
+def clear_prediction_history(force: bool = False, pause: bool = True) -> None:
+    ensure_directories()
+
+    if not os.path.exists(MEM_FILE):
+        print("Prediction log not found; nothing to clear.")
+        finalize_section(pause, clear=False)
+        return
+
+    if not force:
+        print(
+            "\nThis will delete all stored predictions and accuracy metrics from the local log."
+        )
+        try:
+            confirmation = input("Type 'CLEAR' to confirm: ").strip().upper()
+        except EOFError:
+            confirmation = ""
+        if confirmation != "CLEAR":
+            print("Aborted; prediction history was not cleared.")
+            finalize_section(pause, clear=False)
+            return
+
+    try:
+        os.remove(MEM_FILE)
+        ensure_memory_file()
+        print(f"Prediction history cleared. Fresh log created at {MEM_FILE}.")
+    except Exception as exc:
+        print(f"Could not clear prediction history: {exc}")
+
+    finalize_section(pause, clear=False)
 
 
 def safe_float(value: Optional[str], fallback: float) -> float:
@@ -2150,6 +2182,10 @@ Review mode: --action review reads memory/predictions_log.csv without running
 new forecasts. Combine it with --ticker/--period filters, --review-limit to
 cap the number of rows, and --review-export to save the filtered slice.
 
+Clear the local log: --action clear-predictions wipes memory/predictions_log.csv
+so you can run isolated tests; add --force-clear to skip the confirmation
+prompt when automating resets.
+
 Use the menu self-test option or --action selftest to run the engines against
 a synthetic dataset without requiring network connectivity.
 
@@ -2469,6 +2505,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
             "forecast",
             "auto-eval",
             "review",
+            "clear-predictions",
             "train",
             "help",
             "diagnostics",
@@ -2542,6 +2579,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Optional path to export filtered prediction history when using --action review.",
     )
     parser.add_argument(
+        "--force-clear",
+        action="store_true",
+        help="Skip confirmation when clearing prediction history with --action clear-predictions.",
+    )
+    parser.add_argument(
         "--install-deps",
         action="store_true",
         help="Install/update dependencies before running (skipped by default).",
@@ -2600,6 +2642,8 @@ def dispatch_cli_action(args) -> None:
             limit=args.review_limit,
             export_path=args.review_export,
         )
+    elif action == "clear-predictions":
+        clear_prediction_history(force=args.force_clear, pause=False)
     elif action == "train":
         run_training_workflow(
             pause=False,
