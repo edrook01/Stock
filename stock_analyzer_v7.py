@@ -496,7 +496,8 @@ INTERVAL_MAP = {
     "week": ("max", "1wk"),
     "month": ("max", "1mo"),
     "quarter": ("max", "3mo"),
-    "year": ("max", "1y"),
+    # Yahoo Finance does not support a 1y interval; use 1mo to sample yearly spans.
+    "year": ("max", "1mo"),
 }
 
 LONG_PERIODS = {"month", "quarter", "year"}
@@ -525,13 +526,78 @@ def fetch_history(ticker: str, period_choice: str, bars_back: Optional[int] = No
         ticker_client = yfinance.Ticker(ticker)
         data = ticker_client.history(period=period, interval=interval)
         if data is None or data.empty:
-            return None
+            log(
+                "No data returned; running diagnostics to identify possible interval or ticker issues."
+            )
+            data = _diagnose_and_retry_history(
+                ticker_client, ticker, period, interval, bars_limit
+            )
+            if data is None or data.empty:
+                return None
         if bars_limit is not None and len(data) > bars_limit:
             data = data.tail(bars_limit)
         return data
     except Exception as exc:
         log(f"Failed to fetch data for {ticker}: {exc}")
         return None
+
+
+def _diagnose_and_retry_history(
+    ticker_client,
+    ticker: str,
+    period: str,
+    interval: str,
+    bars_limit: Optional[int],
+):
+    """Attempt to determine why no data was returned and retry with safer defaults."""
+
+    hints: List[str] = []
+
+    try:
+        fast_info = getattr(ticker_client, "fast_info", None)
+        if fast_info:
+            currency = fast_info.get("currency") if isinstance(fast_info, dict) else None
+            last_price = fast_info.get("lastPrice") if isinstance(fast_info, dict) else None
+            hints.append(
+                f"fast_info present (currency={currency}, lastPrice={last_price})"
+            )
+        else:
+            hints.append("fast_info empty or unavailable")
+    except Exception as exc:
+        hints.append(f"fast_info error: {exc}")
+
+    fallback_requests = [
+        ("1y", "1d"),
+        ("6mo", "1d"),
+        ("3mo", "1d"),
+        ("1mo", "1d"),
+        ("1y", "1wk"),
+    ]
+
+    for fb_period, fb_interval in fallback_requests:
+        try:
+            retry = ticker_client.history(period=fb_period, interval=fb_interval)
+            if retry is not None and not retry.empty:
+                hints.append(
+                    f"Recovered with fallback period={fb_period}, interval={fb_interval}"
+                )
+                if bars_limit is not None and len(retry) > bars_limit:
+                    retry = retry.tail(bars_limit)
+                log(
+                    "Diagnostics: "
+                    + "; ".join(hints)
+                    + f"; primary request period={period}, interval={interval}"
+                )
+                return retry
+        except Exception as exc:
+            hints.append(f"fallback {fb_period}/{fb_interval} failed: {exc}")
+
+    log(
+        "Diagnostics: "
+        + "; ".join(hints)
+        + f"; unable to fetch data for {ticker} with period={period}, interval={interval}"
+    )
+    return None
 
 
 def compute_indicators(df):  # type: ignore[override]
