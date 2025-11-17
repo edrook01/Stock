@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import csv
 import math
+import random
 import os
 import sys
 import subprocess
@@ -1832,6 +1833,12 @@ Automation: --action train runs a single self-evaluation cycle by default.
 Pass --auto-train to keep it running in a loop, and adjust --train-interval
 to control how many seconds the workflow sleeps between cycles. The loop
 listens for SIGINT/SIGTERM so it can stop gracefully in unattended mode.
+
+Continuous auto-evaluation: --action auto-eval now accepts --auto-eval-loop
+and --eval-interval to keep cycling through the full ticker universe. Use
+--max-tickers if you want to cap the universe per pass when dealing with very
+large symbol lists while still collecting hundreds of thousands of samples
+over time.
         """
     )
     maybe_pause(pause)
@@ -1936,43 +1943,78 @@ def run_self_test(pause: bool = True) -> None:
     maybe_pause(pause)
 
 
-def run_auto_evaluation_workflow(review_limit: int = 10) -> None:
-    print("\n=== Auto Ticker Self-Evaluation ===\n")
-    tracked_tickers = discover_tracked_tickers()
-    track_periods = list(INTERVAL_MAP.keys())
-    combos = [(ticker, period) for ticker in tracked_tickers for period in track_periods]
+def run_auto_evaluation_workflow(
+    review_limit: int = 10,
+    loop: bool = False,
+    sleep_interval: int = 300,
+    max_tickers: Optional[int] = None,
+) -> None:
+    """Cycle through the full ticker universe (optionally in a loop)."""
 
-    ready_combos: List[Tuple[str, str]] = []
-    for ticker, period_choice in combos:
-        history = fetch_history(
-            ticker,
-            period_choice,
-            bars_back=default_bars_for_period(period_choice),
-        )
-        if history is None or history.empty:
-            log(f"No history available for {ticker} ({period_choice}); skipping.")
-            continue
+    def execute_pass() -> bool:
+        print("\n=== Auto Ticker Self-Evaluation ===\n")
+
+        tracked_tickers = discover_tracked_tickers()
+        if max_tickers is not None:
+            tracked_tickers = tracked_tickers[:max_tickers]
+
+        if not tracked_tickers:
+            print("No tickers available to evaluate.")
+            return False
+
+        random.shuffle(tracked_tickers)
+        track_periods = list(INTERVAL_MAP.keys())
+        combos = [(ticker, period) for ticker in tracked_tickers for period in track_periods]
+
+        ready_combos: List[Tuple[str, str]] = []
+        for ticker, period_choice in combos:
+            history = fetch_history(
+                ticker,
+                period_choice,
+                bars_back=default_bars_for_period(period_choice),
+            )
+            if history is None or history.empty:
+                log(f"No history available for {ticker} ({period_choice}); skipping.")
+                continue
+            log(
+                "History ready for {ticker} ({period}); {bars} bars downloaded.".format(
+                    ticker=ticker, period=period_choice, bars=len(history)
+                )
+            )
+            ready_combos.append((ticker, period_choice))
+
+        if not ready_combos:
+            print("Could not fetch history for any tracked ticker/period pair.")
+            return False
+
+        for ticker, period_choice in ready_combos:
+            run_forecast_workflow(
+                ticker=ticker,
+                period_choice=period_choice,
+                pause=False,
+                quiet=True,
+            )
+
+        run_training_workflow(pause=False, loop=False, periods=track_periods)
+        run_review_workflow(pause=False, limit=review_limit)
+        return True
+
+    while True:
+        work_done = execute_pass()
+        if not loop:
+            break
+        if not work_done:
+            log("No tickers processed on this pass; retrying after the sleep interval.")
         log(
-            "History ready for {ticker} ({period}); {bars} bars downloaded.".format(
-                ticker=ticker, period=period_choice, bars=len(history)
+            "Auto evaluation loop sleeping for {seconds} seconds before restarting...".format(
+                seconds=max(1, sleep_interval)
             )
         )
-        ready_combos.append((ticker, period_choice))
-
-    if not ready_combos:
-        print("Could not fetch history for any tracked ticker/period pair.")
-        return
-
-    for ticker, period_choice in ready_combos:
-        run_forecast_workflow(
-            ticker=ticker,
-            period_choice=period_choice,
-            pause=False,
-            quiet=True,
-        )
-
-    run_training_workflow(pause=False, loop=False, periods=track_periods)
-    run_review_workflow(pause=False, limit=review_limit)
+        try:
+            time.sleep(max(1, sleep_interval))
+        except KeyboardInterrupt:
+            log("Auto evaluation loop interrupted; exiting after current pass.")
+            break
 
 
 # =============================================================
@@ -2051,6 +2093,22 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=60,
         help="Seconds to sleep between training loop iterations when --auto-train is set.",
     )
+    parser.add_argument(
+        "--auto-eval-loop",
+        action="store_true",
+        help="Continuously run the auto-evaluation workflow instead of a single pass.",
+    )
+    parser.add_argument(
+        "--eval-interval",
+        type=int,
+        default=300,
+        help="Seconds to sleep between auto-eval loop iterations when --auto-eval-loop is set.",
+    )
+    parser.add_argument(
+        "--max-tickers",
+        type=int,
+        help="Limit the number of tickers processed per auto-eval pass (use all by default).",
+    )
     parser.add_argument("--ticker", help="Ticker symbol for automated runs.")
     parser.add_argument(
         "--period",
@@ -2117,7 +2175,12 @@ def dispatch_cli_action(args) -> None:
             pause=False,
         )
     elif action == "auto-eval":
-        run_auto_evaluation_workflow(review_limit=args.review_limit)
+        run_auto_evaluation_workflow(
+            review_limit=args.review_limit,
+            loop=args.auto_eval_loop,
+            sleep_interval=args.eval_interval,
+            max_tickers=args.max_tickers,
+        )
     elif action == "review":
         run_review_workflow(
             pause=False,
