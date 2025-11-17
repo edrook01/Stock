@@ -55,6 +55,19 @@ DEFAULT_TICKER_CSV = os.environ.get(
     "TICKER_UNIVERSE_CSV", os.path.join(DATA_DIR, "trading212_listings.csv")
 )
 TICKER_UNIVERSE_API = os.environ.get("TICKER_UNIVERSE_API")
+TRADING212_TICKERS = [
+    "AAPL",
+    "MSFT",
+    "GOOGL",
+    "AMZN",
+    "NVDA",
+    "TSLA",
+    "SPY",
+    "QQQ",
+    "XLK",
+    "AVGO",
+    "ASML",
+]
 
 
 # =============================================================
@@ -287,6 +300,9 @@ def load_external_ticker_universe() -> List[str]:
         if ticker and ticker not in seen:
             candidates.append(ticker)
             seen.add(ticker)
+
+    for ticker in TRADING212_TICKERS:
+        add_candidate(ticker)
 
     csv_path = DEFAULT_TICKER_CSV
     if csv_path and not os.path.isabs(csv_path):
