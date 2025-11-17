@@ -1,4 +1,4 @@
-# Stock Analyzer V7
+# Stock Analyzer V8
 
 This build bundles the market data workflows, forecasting engines, and the
 self-training loop into a single executable script.
@@ -6,7 +6,7 @@ self-training loop into a single executable script.
 ## Quick start
 
 ```bash
-python3 stock_analyzer_v7.py --action menu
+python3 stock_analyzer_v8.py --action menu
 ```
 
 ## Automated training
@@ -15,11 +15,11 @@ The training workflow can run once or continuously:
 
 - Run a single pass (default):
   ```bash
-  python3 stock_analyzer_v7.py --action train
+  python3 stock_analyzer_v8.py --action train
   ```
 - Enable continuous mode with a configurable pause between passes:
   ```bash
-  python3 stock_analyzer_v7.py --action train --auto-train --train-interval 120
+  python3 stock_analyzer_v8.py --action train --auto-train --train-interval 120
   ```
 
 When `--auto-train` is set, the loop sleeps for the given interval (seconds)
