@@ -115,8 +115,15 @@ def guided_prompt(
     return prompt(f"{label}{default_hint}: ", default)
 
 
-def install_packages_local() -> None:
+def install_packages_local(wheel_dir: Optional[str] = None) -> None:
     log("Checking dependencies...")
+
+    if wheel_dir:
+        if not os.path.isdir(wheel_dir):
+            log(f"!! Wheel directory not found: {wheel_dir}")
+            sys.exit(1)
+        log(f"Using local wheel/cache directory: {wheel_dir}")
+
     for import_name, (pip_name, version) in PACKAGE_SPECS.items():
         optional = import_name == "torch"
 
@@ -130,19 +137,22 @@ def install_packages_local() -> None:
         pkg_str = pip_name if version is None else f"{pip_name}=={version}"
 
         try:
-            subprocess.check_call(
-                [
-                    sys.executable,
-                    "-m",
-                    "pip",
-                    "install",
-                    pkg_str,
-                    "--target",
-                    LIB_DIR,
-                    "--upgrade",
-                    "--no-warn-script-location",
-                ]
-            )
+            command = [
+                sys.executable,
+                "-m",
+                "pip",
+                "install",
+                pkg_str,
+                "--target",
+                LIB_DIR,
+                "--upgrade",
+                "--no-warn-script-location",
+            ]
+
+            if wheel_dir:
+                command.extend(["--no-index", "--find-links", wheel_dir])
+
+            subprocess.check_call(command)
             log(f"✔ Installed {pkg_str}")
         except Exception as exc:  # pragma: no cover - runtime guard
             log(f"!! Failed: {exc}")
@@ -162,11 +172,14 @@ def safe_import(name: str):  # type: ignore[override]
         return None
 
 
-def bootstrap(clear_after: bool = False) -> None:
-    ensure_directories()
-    ensure_lib_path()
+def bootstrap(
+    *, install_deps: bool = False, wheel_dir: Optional[str] = None, clear_after: bool = False
+) -> None:
     log("Bootstrapping...")
-    install_packages_local()
+    if install_deps:
+        install_packages_local(wheel_dir=wheel_dir)
+    else:
+        log("Skipping dependency installation (use --install-deps to provision packages).")
 
     global yfinance, pd, np, ta_mod, pta, skl
     global requests_mod, tabulate_mod, torch_mod, plt_mod
@@ -183,7 +196,10 @@ def bootstrap(clear_after: bool = False) -> None:
     plt_mod = safe_import("matplotlib.pyplot")
 
     if yfinance is None or pd is None or np is None:
-        print("Critical imports failed. Exiting.")
+        print(
+            "Critical imports failed. Run with --install-deps (and optionally --wheel-dir) "
+            "to provision dependencies. Exiting."
+        )
         sys.exit(1)
 
     log("Bootstrap complete.\n")
@@ -2107,13 +2123,49 @@ def run_self_test(pause: bool = True) -> None:
 
 def run_auto_evaluation_workflow(
     review_limit: int = 10,
-    loop: bool = False,
+    loop: bool = True,
     sleep_interval: int = 300,
     max_tickers: Optional[int] = None,
 ) -> None:
-    """Cycle through the full ticker universe (optionally in a loop)."""
+    """Cycle through the full ticker universe in a loop by default."""
 
-    def execute_pass() -> bool:
+    next_eligible: Dict[Tuple[str, str], datetime] = {}
+
+    def target_time_for(period_choice: str, horizon: int) -> datetime:
+        normalized = (period_choice or "day").lower()
+        hours = horizon if normalized == "hour" else horizon * 24
+        return datetime.now() + timedelta(hours=hours)
+
+    def refresh_next_eligible_from_memory() -> None:
+        if pd is None or not os.path.exists(MEM_FILE):
+            return
+
+        try:
+            df = pd.read_csv(MEM_FILE)
+        except Exception as exc:  # pragma: no cover - defensive
+            log(f"Could not refresh active horizons from memory: {exc}")
+            return
+
+        now = datetime.now()
+        pending = df[(df["actual_price"].isna()) & (df["target_time"].notna())]
+
+        for _, row in pending.iterrows():
+            ticker = normalize_ticker_symbol(str(row.get("ticker", "")))
+            period_choice = str(row.get("period", "")).strip().lower()
+            if not ticker or period_choice not in INTERVAL_MAP:
+                continue
+            try:
+                target_time = datetime.fromisoformat(str(row["target_time"]))
+            except Exception:
+                continue
+            if target_time <= now:
+                continue
+            combo = (ticker, period_choice)
+            existing = next_eligible.get(combo)
+            if existing is None or target_time > existing:
+                next_eligible[combo] = target_time
+
+    def execute_pass() -> Tuple[bool, Optional[datetime]]:
         print("\n=== Auto Ticker Self-Evaluation ===\n")
 
         tracked_tickers = discover_tracked_tickers()
@@ -2122,13 +2174,17 @@ def run_auto_evaluation_workflow(
 
         if not tracked_tickers:
             print("No tickers available to evaluate.")
-            return False
+            return False, None
 
         random.shuffle(tracked_tickers)
         track_periods = list(INTERVAL_MAP.keys())
         combos = [(ticker, period) for ticker in tracked_tickers for period in track_periods]
 
+        refresh_next_eligible_from_memory()
+
         ready_combos: List[Tuple[str, str]] = []
+        soonest_next: Optional[datetime] = None
+        now = datetime.now()
         for ticker, period_choice in combos:
             history = fetch_history(
                 ticker,
@@ -2137,6 +2193,17 @@ def run_auto_evaluation_workflow(
             )
             if history is None or history.empty:
                 log(f"No history available for {ticker} ({period_choice}); skipping.")
+                continue
+            combo = (ticker, period_choice)
+            ready_at = next_eligible.get(combo)
+            if ready_at and ready_at > now:
+                log(
+                    "Skipping {ticker} ({period}) until {time} due to active horizon.".format(
+                        ticker=ticker, period=period_choice, time=ready_at.isoformat()
+                    )
+                )
+                if soonest_next is None or ready_at < soonest_next:
+                    soonest_next = ready_at
                 continue
             log(
                 "History ready for {ticker} ({period}); {bars} bars downloaded.".format(
@@ -2147,33 +2214,53 @@ def run_auto_evaluation_workflow(
 
         if not ready_combos:
             print("Could not fetch history for any tracked ticker/period pair.")
-            return False
+            return False, soonest_next
 
         for ticker, period_choice in ready_combos:
+            horizon = default_horizon_for_period(period_choice)
             run_forecast_workflow(
                 ticker=ticker,
                 period_choice=period_choice,
+                horizon=horizon,
                 pause=False,
                 quiet=True,
             )
+            next_eligible[(ticker, period_choice)] = target_time_for(period_choice, horizon)
 
         run_training_workflow(pause=False, loop=False, periods=track_periods)
         run_review_workflow(pause=False, limit=review_limit)
-        return True
+        return True, None
 
     while True:
-        work_done = execute_pass()
+        work_done, next_ready = execute_pass()
         if not loop:
             break
+        sleep_for = max(1, sleep_interval)
+        soonest_active = min(
+            (ts for ts in next_eligible.values() if ts > datetime.now()),
+            default=None,
+        )
+        if soonest_active:
+            sleep_for = min(
+                sleep_for,
+                max(1, int((soonest_active - datetime.now()).total_seconds())),
+            )
         if not work_done:
-            log("No tickers processed on this pass; retrying after the sleep interval.")
+            reason = (
+                f"next eligible at {next_ready.isoformat()}" if next_ready else "waiting for data"
+            )
+            log(
+                "No tickers processed on this pass ({reason}); retrying after {seconds} seconds.".format(
+                    reason=reason, seconds=sleep_for
+                )
+            )
         log(
             "Auto evaluation loop sleeping for {seconds} seconds before restarting...".format(
-                seconds=max(1, sleep_interval)
+                seconds=sleep_for
             )
         )
         try:
-            time.sleep(max(1, sleep_interval))
+            time.sleep(sleep_for)
         except KeyboardInterrupt:
             log("Auto evaluation loop interrupted; exiting after current pass.")
             break
@@ -2258,13 +2345,19 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--auto-eval-loop",
         action="store_true",
-        help="Continuously run the auto-evaluation workflow instead of a single pass.",
+        default=None,
+        help="(Deprecated) Continuously run the auto-evaluation workflow instead of a single pass.",
     )
     parser.add_argument(
         "--eval-interval",
         type=int,
         default=300,
         help="Seconds to sleep between auto-eval loop iterations when --auto-eval-loop is set.",
+    )
+    parser.add_argument(
+        "--eval-once",
+        action="store_true",
+        help="Run the auto-evaluation workflow only once (loop by default).",
     )
     parser.add_argument(
         "--max-tickers",
@@ -2301,6 +2394,16 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--review-export",
         dest="review_export",
         help="Optional path to export filtered prediction history when using --action review.",
+    )
+    parser.add_argument(
+        "--install-deps",
+        action="store_true",
+        help="Install/update dependencies before running (skipped by default).",
+    )
+    parser.add_argument(
+        "--wheel-dir",
+        dest="wheel_dir",
+        help="Path to a local wheel/cache directory to use with --install-deps.",
     )
     return parser
 
@@ -2339,7 +2442,7 @@ def dispatch_cli_action(args) -> None:
     elif action == "auto-eval":
         run_auto_evaluation_workflow(
             review_limit=args.review_limit,
-            loop=args.auto_eval_loop,
+            loop=args.auto_eval_loop if args.auto_eval_loop is not None else not args.eval_once,
             sleep_interval=args.eval_interval,
             max_tickers=args.max_tickers,
         )
@@ -2371,7 +2474,7 @@ def main(argv: Optional[List[str]] = None) -> None:
     print_banner()
     parser = build_arg_parser()
     args = parser.parse_args(argv)
-    bootstrap()
+    bootstrap(install_deps=args.install_deps, wheel_dir=args.wheel_dir)
     dispatch_cli_action(args)
 
 
