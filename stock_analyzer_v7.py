@@ -11,6 +11,7 @@ debug on fresh machines.
 from __future__ import annotations
 
 import argparse
+import csv
 import math
 import os
 import sys
@@ -28,6 +29,9 @@ print(f"\n=== Stock Analyzer {VERSION} - Predictive (Complete Build) ===\n")
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 LIB_DIR = os.path.join(BASE_DIR, "libs")
 MEM_DIR = os.path.join(BASE_DIR, "memory")
+DATA_DIR = os.path.join(BASE_DIR, "data")
+
+os.makedirs(DATA_DIR, exist_ok=True)
 
 os.makedirs(LIB_DIR, exist_ok=True)
 os.makedirs(MEM_DIR, exist_ok=True)
@@ -36,6 +40,10 @@ sys.path.insert(0, LIB_DIR)
 MEM_FILE = os.path.join(MEM_DIR, "predictions_log.csv")
 DEFAULT_BAND_PERCENT = 5.0
 DEFAULT_TICKERS = ["SPY", "AAPL", "MSFT", "TSLA", "NVDA"]
+DEFAULT_TICKER_CSV = os.environ.get(
+    "TICKER_UNIVERSE_CSV", os.path.join(DATA_DIR, "trading212_listings.csv")
+)
+TICKER_UNIVERSE_API = os.environ.get("TICKER_UNIVERSE_API")
 
 
 # =============================================================
@@ -54,6 +62,8 @@ PACKAGE_SPECS: Dict[str, Tuple[str, Optional[str]]] = {
     "matplotlib": ("matplotlib", "3.8.4"),
     "torch": ("torch", None),  # optional – used for NN if available.
 }
+
+yfinance = pd = np = ta_mod = pta = skl = requests_mod = tabulate_mod = torch_mod = plt_mod = None  # type: ignore[assignment]
 
 
 def log(msg: str) -> None:
@@ -226,16 +236,107 @@ def safe_float(value: Optional[str], fallback: float) -> float:
         return fallback
 
 
+def normalize_ticker_symbol(value: Optional[str]) -> Optional[str]:
+    ticker = str(value or "").strip().upper()
+    if not ticker or len(ticker) > 10:
+        return None
+    allowed_chars = set("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-=")
+    if any(ch not in allowed_chars for ch in ticker):
+        return None
+    return ticker
+
+
+def load_external_ticker_universe() -> List[str]:
+    """Load additional tickers from a CSV file or API response when available."""
+
+    candidates: List[str] = []
+    seen = set()
+
+    def add_candidate(raw: Optional[str]) -> None:
+        ticker = normalize_ticker_symbol(raw)
+        if ticker and ticker not in seen:
+            candidates.append(ticker)
+            seen.add(ticker)
+
+    csv_path = DEFAULT_TICKER_CSV
+    if csv_path and not os.path.isabs(csv_path):
+        csv_path = os.path.join(BASE_DIR, csv_path)
+
+    if csv_path and os.path.exists(csv_path):
+        try:
+            if pd is not None:
+                df = pd.read_csv(csv_path)
+                column = None
+                for candidate_col in ("ticker", "symbol", "Ticker", "Symbol"):
+                    if candidate_col in df.columns:
+                        column = candidate_col
+                        break
+                if column is None and not df.empty:
+                    column = df.columns[0]
+                if column:
+                    for value in df[column].dropna().unique():
+                        add_candidate(str(value))
+            else:
+                with open(csv_path, "r", encoding="utf-8") as handle:
+                    reader = csv.reader(handle)
+                    for row in reader:
+                        if not row:
+                            continue
+                        add_candidate(row[0])
+        except Exception as exc:
+            log(f"Unable to load ticker CSV at {csv_path}: {exc}")
+
+    api_url = TICKER_UNIVERSE_API
+    if api_url and requests_mod is not None:
+        try:
+            response = requests_mod.get(api_url, timeout=15)
+            response.raise_for_status()
+            payload = response.json()
+            if isinstance(payload, list):
+                if payload and isinstance(payload[0], dict):
+                    for item in payload:
+                        add_candidate(item.get("symbol") or item.get("ticker") or item.get("code"))
+                else:
+                    for item in payload:
+                        add_candidate(str(item))
+            elif isinstance(payload, dict):
+                for key in ("tickers", "symbols"):
+                    if key in payload and isinstance(payload[key], list):
+                        for item in payload[key]:
+                            add_candidate(item.get("symbol") if isinstance(item, dict) else str(item))
+        except Exception as exc:
+            log(f"Unable to load ticker universe from API: {exc}")
+
+    return candidates
+
+
 def discover_tracked_tickers() -> List[str]:
     ensure_memory_file()
+    tracked: List[str] = []
     try:
         df = pd.read_csv(MEM_FILE)
-        tracked = sorted([t for t in df["ticker"].dropna().unique() if isinstance(t, str) and t.strip()])
-        if tracked:
-            return tracked
+        tracked = [
+            normalize_ticker_symbol(t)
+            for t in df["ticker"].dropna().unique()
+            if isinstance(t, str)
+        ]
+        tracked = [t for t in tracked if t]
     except Exception:
-        pass
-    return DEFAULT_TICKERS.copy()
+        tracked = []
+
+    external = load_external_ticker_universe()
+
+    combined: List[str] = []
+    seen = set()
+
+    for source in (tracked, external, DEFAULT_TICKERS):
+        for ticker in source:
+            ticker_norm = normalize_ticker_symbol(ticker)
+            if ticker_norm and ticker_norm not in seen:
+                combined.append(ticker_norm)
+                seen.add(ticker_norm)
+
+    return combined
 
 
 def select_ticker_with_history(
@@ -1306,6 +1407,8 @@ def run_training_workflow(
 ) -> None:
     track_periods = periods or list(INTERVAL_MAP.keys())
     stop_requested = False
+    ticker_universe = discover_tracked_tickers()
+    default_combos = [(ticker, period) for ticker in ticker_universe for period in track_periods]
 
     def handle_shutdown(signum, _frame):
         nonlocal stop_requested
@@ -1319,10 +1422,10 @@ def run_training_workflow(
             df = pd.read_csv(MEM_FILE)
         except Exception as exc:
             print(f"Could not load memory file: {exc}")
-            default_combos = [(ticker, period) for ticker in discover_tracked_tickers() for period in track_periods]
-            return default_combos, False
+            return sorted(default_combos), False
 
-        combos = (
+        combos: List[Tuple[str, str]] = []
+        raw_combos = (
             df[["ticker", "period"]]
             .dropna()
             .drop_duplicates()
@@ -1330,8 +1433,18 @@ def run_training_workflow(
             .tolist()
         )
 
+        for ticker_raw, period_raw in raw_combos:
+            ticker = normalize_ticker_symbol(ticker_raw)
+            period_choice = (period_raw or "").strip().lower()
+            if ticker and period_choice in INTERVAL_MAP:
+                combos.append((ticker, period_choice))
+
         if not combos:
-            combos = [(ticker, period) for ticker in discover_tracked_tickers() for period in track_periods]
+            combos = list(default_combos)
+        else:
+            combos_set = {(ticker, period) for ticker, period in combos}
+            combos_set.update(default_combos)
+            combos = sorted(combos_set)
 
         updates_made = False
         if df.empty:
@@ -1401,18 +1514,48 @@ def run_training_workflow(
 
     def run_live_forecasts(combos: List[Tuple[str, str]]) -> None:
         print("\n=== Live forecast refresh (auto-filled tickers) ===\n")
-        for ticker, period in combos:
-            try:
-                run_forecast_workflow(
-                    ticker=ticker,
-                    period_choice=period,
-                    horizon=default_horizon_for_period(period),
-                    band=DEFAULT_BAND_PERCENT,
-                    pause=False,
-                    quiet=True,
+        batch_size = max(1, safe_int(os.environ.get("TRAINING_BATCH_SIZE"), 25))
+        cooldown = max(0, safe_int(os.environ.get("TRAINING_BATCH_COOLDOWN"), 5))
+
+        for start in range(0, len(combos), batch_size):
+            batch = combos[start : start + batch_size]
+            batch_number = (start // batch_size) + 1
+            print(f"Processing batch {batch_number} with {len(batch)} ticker/period pairs...")
+
+            for ticker, period in batch:
+                if stop_requested:
+                    break
+                ticker_norm = normalize_ticker_symbol(ticker)
+                period_choice = (period or "").strip().lower()
+                if not ticker_norm or period_choice not in INTERVAL_MAP:
+                    log(f"Skipping invalid combo: ticker={ticker}, period={period}")
+                    continue
+                try:
+                    run_forecast_workflow(
+                        ticker=ticker_norm,
+                        period_choice=period_choice,
+                        horizon=default_horizon_for_period(period_choice),
+                        band=DEFAULT_BAND_PERCENT,
+                        pause=False,
+                        quiet=True,
+                    )
+                except Exception as exc:
+                    log(f"Live forecast failed for {ticker_norm} ({period_choice}): {exc}")
+
+            if stop_requested:
+                break
+
+            if start + batch_size < len(combos) and cooldown:
+                log(
+                    "Cooling down for {seconds}s before the next batch to respect data provider limits.".format(
+                        seconds=cooldown
+                    )
                 )
-            except Exception as exc:
-                log(f"Live forecast failed for {ticker} ({period}): {exc}")
+                try:
+                    time.sleep(cooldown)
+                except KeyboardInterrupt:
+                    log("Cooldown interrupted; stopping training loop after current batch.")
+                    break
 
     original_sigint = signal.getsignal(signal.SIGINT)
     original_sigterm = signal.getsignal(signal.SIGTERM)
