@@ -239,7 +239,7 @@ def discover_tracked_tickers() -> List[str]:
 
 
 def select_ticker_with_history(
-    primary: str, period_choice: str, bars_back: int = 600
+    primary: str, period_choice: str, bars_back: Optional[int] = None
 ):
     """Return the first ticker that produces price history.
 
@@ -270,7 +270,26 @@ def default_horizon_for_period(period_choice: str) -> int:
         return 6
     if period_choice == "week":
         return 1
+    if period_choice in ("month", "quarter", "year"):
+        return 1
     return 3
+
+
+def horizon_days_for_period(period_choice: str, horizon: int) -> int:
+    normalized = (period_choice or "day").lower()
+    if normalized == "hour":
+        return max(1, math.ceil(horizon / 6))
+    if normalized == "day":
+        return max(1, horizon)
+    if normalized == "week":
+        return max(1, horizon * 7)
+    if normalized == "month":
+        return max(1, horizon * 30)
+    if normalized == "quarter":
+        return max(1, horizon * 90)
+    if normalized == "year":
+        return max(1, horizon * 365)
+    return max(1, horizon)
 
 
 def append_prediction_record(
@@ -372,25 +391,42 @@ def update_memory_accuracy_for_ticker(
 
 INTERVAL_MAP = {
     "hour": ("60d", "1h"),
-    "day": ("5y", "1d"),
-    "week": ("10y", "1wk"),
+    "day": ("10y", "1d"),
+    "week": ("max", "1wk"),
+    "month": ("max", "1mo"),
+    "quarter": ("max", "3mo"),
+    "year": ("max", "1y"),
 }
 
+LONG_PERIODS = {"month", "quarter", "year"}
 
-def fetch_history(ticker: str, period_choice: str, bars_back: int = 300):
+
+def default_bars_for_period(period_choice: str) -> Optional[int]:
+    normalized = (period_choice or "day").lower()
+    if normalized in LONG_PERIODS:
+        return None
+    if normalized == "hour":
+        return 600
+    if normalized == "week":
+        return 2000
+    return 2000
+
+
+def fetch_history(ticker: str, period_choice: str, bars_back: Optional[int] = None):
     if yfinance is None:
         raise RuntimeError("yfinance missing after bootstrap")
 
     period_choice = period_choice.lower()
     period, interval = INTERVAL_MAP.get(period_choice, INTERVAL_MAP["day"])
+    bars_limit = default_bars_for_period(period_choice) if bars_back is None else bars_back
 
     try:
         ticker_client = yfinance.Ticker(ticker)
         data = ticker_client.history(period=period, interval=interval)
         if data is None or data.empty:
             return None
-        if len(data) > bars_back:
-            data = data.tail(bars_back)
+        if bars_limit is not None and len(data) > bars_limit:
+            data = data.tail(bars_limit)
         return data
     except Exception as exc:
         log(f"Failed to fetch data for {ticker}: {exc}")
@@ -1046,12 +1082,12 @@ def run_sma_report(
         period_choice
         or guided_prompt(
             "Period",
-            "Choose one of: hour, day, or week to set candle duration.",
+            "Choose one of: hour, day, week, month, quarter, or year to set candle duration.",
             "day",
             "day",
         )
     ).strip().lower() or "day"
-    df = fetch_history(ticker, period_choice, bars_back=400)
+    df = fetch_history(ticker, period_choice, bars_back=default_bars_for_period(period_choice))
     if df is None or df.empty:
         print("No data downloaded.")
         return
@@ -1097,12 +1133,16 @@ def run_plot(
         period_choice
         or guided_prompt(
             "Period",
-            "Select hour, day, or week to match your plotting cadence.",
+            "Select hour, day, week, month, quarter, or year to match your plotting cadence.",
             "week",
             "day",
         )
     ).strip().lower() or "day"
-    df = fetch_history(ticker, period_choice, bars_back=bars_back or 300)
+    df = fetch_history(
+        ticker,
+        period_choice,
+        bars_back=bars_back if bars_back is not None else default_bars_for_period(period_choice),
+    )
     if df is None or df.empty:
         print("No data downloaded.")
         return
@@ -1145,12 +1185,16 @@ def run_csv_download(
         period_choice
         or guided_prompt(
             "Period",
-            "Pick hour, day, or week candles for the CSV output.",
+            "Pick hour, day, week, month, quarter, or year candles for the CSV output.",
             "hour",
             "day",
         )
     ).strip().lower() or "day"
-    df = fetch_history(ticker, period_choice, bars_back=bars_override or 2000)
+    df = fetch_history(
+        ticker,
+        period_choice,
+        bars_back=bars_override if bars_override is not None else default_bars_for_period(period_choice),
+    )
     if df is None or df.empty:
         print("No data downloaded.")
         return
@@ -1195,7 +1239,7 @@ def run_forecast_workflow(
             else:
                 period_choice = guided_prompt(
                     "Period",
-                    "Choose the candle size: hour, day, or week.",
+                    "Choose the candle size: hour, day, week, month, quarter, or year.",
                     "hour",
                     "day",
                 )
@@ -1224,11 +1268,15 @@ def run_forecast_workflow(
             )
         )
         band = max(0.5, band)
-        df = fetch_history(ticker, period_choice, bars_back=600)
+        df = fetch_history(
+            ticker,
+            period_choice,
+            bars_back=default_bars_for_period(period_choice),
+        )
         if (df is None or df.empty) and (quiet or not interactive):
             original = ticker
             ticker, df = select_ticker_with_history(
-                ticker, period_choice, bars_back=600
+                ticker, period_choice, bars_back=default_bars_for_period(period_choice)
             )
             if df is not None and not df.empty and ticker != original:
                 log(
@@ -1240,7 +1288,7 @@ def run_forecast_workflow(
 
         df = compute_indicators(df)
         last_close = float(df["Close"].iloc[-1])
-        horizon_days = max(1, math.ceil(horizon / 6)) if period_choice == "hour" else max(1, horizon)
+        horizon_days = horizon_days_for_period(period_choice, horizon)
         news_context = collect_news_context(ticker, horizon_days=horizon_days)
         history_accuracy = update_memory_accuracy_for_ticker(ticker)
         if history_accuracy and not quiet:
@@ -1666,7 +1714,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--period",
         choices=sorted(INTERVAL_MAP.keys()),
-        help="Data period: hour, day or week.",
+        help="Data period: hour, day, week, month, quarter, or year.",
     )
     parser.add_argument("--horizon", type=int, help="Forecast horizon in bars.")
     parser.add_argument("--bars", type=int, help="Override number of historical bars to fetch.")
