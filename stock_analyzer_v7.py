@@ -371,7 +371,7 @@ def default_horizon_for_period(period_choice: str) -> int:
         return 6
     if period_choice == "week":
         return 1
-    if period_choice in ("month", "quarter", "year"):
+    if period_choice in ("month", "quarter"):
         return 1
     return 3
 
@@ -388,8 +388,6 @@ def horizon_days_for_period(period_choice: str, horizon: int) -> int:
         return max(1, horizon * 30)
     if normalized == "quarter":
         return max(1, horizon * 90)
-    if normalized == "year":
-        return max(1, horizon * 365)
     return max(1, horizon)
 
 
@@ -496,10 +494,9 @@ INTERVAL_MAP = {
     "week": ("max", "1wk"),
     "month": ("max", "1mo"),
     "quarter": ("max", "3mo"),
-    "year": ("max", "1y"),
 }
 
-LONG_PERIODS = {"month", "quarter", "year"}
+LONG_PERIODS = {"month", "quarter"}
 
 
 def default_bars_for_period(period_choice: str) -> Optional[int]:
@@ -1186,7 +1183,7 @@ def run_sma_report(
         period_choice
         or guided_prompt(
             "Period",
-            "Choose one of: hour, day, week, month, quarter, or year to set candle duration.",
+            "Choose one of: hour, day, week, month, or quarter to set candle duration.",
             "day",
             "day",
         )
@@ -1307,7 +1304,7 @@ def run_plot(
         period_choice
         or guided_prompt(
             "Period",
-            "Select hour, day, week, month, quarter, or year to match your plotting cadence.",
+            "Select hour, day, week, month, or quarter to match your plotting cadence.",
             "week",
             "day",
         )
@@ -1359,7 +1356,7 @@ def run_csv_download(
         period_choice
         or guided_prompt(
             "Period",
-            "Pick hour, day, week, month, quarter, or year candles for the CSV output.",
+            "Pick hour, day, week, month, or quarter candles for the CSV output.",
             "hour",
             "day",
         )
@@ -1413,7 +1410,7 @@ def run_forecast_workflow(
             else:
                 period_choice = guided_prompt(
                     "Period",
-                    "Choose the candle size: hour, day, week, month, quarter, or year.",
+                    "Choose the candle size: hour, day, week, month, or quarter.",
                     "hour",
                     "day",
                 )
@@ -2055,7 +2052,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--period",
         choices=sorted(INTERVAL_MAP.keys()),
-        help="Data period: hour, day, week, month, quarter, or year.",
+        help="Data period: hour, day, week, month, or quarter.",
     )
     parser.add_argument("--horizon", type=int, help="Forecast horizon in bars.")
     parser.add_argument("--bars", type=int, help="Override number of historical bars to fetch.")
