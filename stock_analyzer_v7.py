@@ -1449,6 +1449,92 @@ def run_training_workflow(
         finalize_section(pause and not loop, clear=False)
 
 
+def run_review_workflow(
+    pause: bool = True,
+    ticker: Optional[str] = None,
+    period: Optional[str] = None,
+    limit: int = 20,
+    export_path: Optional[str] = None,
+) -> None:
+    print("\n=== Prediction History Review ===\n")
+    ensure_memory_file()
+    if pd is None:
+        print("pandas is required to review prediction history.")
+        finalize_section(pause, clear=False)
+        return
+
+    try:
+        df = pd.read_csv(MEM_FILE)
+    except Exception as exc:
+        print(f"Could not load memory file: {exc}")
+        finalize_section(pause, clear=False)
+        return
+
+    if df.empty:
+        print("No prediction history found yet.")
+        finalize_section(pause, clear=False)
+        return
+
+    view = df.copy()
+    if ticker:
+        ticker_upper = ticker.strip().upper()
+        view = view[view["ticker"].astype(str).str.upper() == ticker_upper]
+    if period:
+        period_lower = period.strip().lower()
+        view = view[view["period"].astype(str).str.lower() == period_lower]
+
+    view["timestamp_parsed"] = pd.to_datetime(view["timestamp"], errors="coerce")
+    view = view.sort_values(by="timestamp_parsed", ascending=False)
+    if limit > 0:
+        view = view.head(limit)
+
+    if view.empty:
+        scope = []
+        if ticker:
+            scope.append(f"ticker {ticker.strip().upper()}")
+        if period:
+            scope.append(f"period {period.strip().lower()}")
+        scope_note = " for " + " and ".join(scope) if scope else ""
+        print(f"No matching prediction records found{scope_note}.")
+        finalize_section(pause, clear=False)
+        return
+
+    columns = [
+        "timestamp",
+        "ticker",
+        "period",
+        "horizon_bars",
+        "engine",
+        "predicted_price",
+        "actual_price",
+        "abs_error",
+        "pct_error",
+        "target_time",
+    ]
+    display_df = view[columns]
+
+    if tabulate_mod:
+        print(
+            tabulate_mod.tabulate(
+                display_df,
+                headers="keys",
+                tablefmt="github",
+                floatfmt=".4f",
+            )
+        )
+    else:
+        print(display_df.to_string(index=False))
+
+    if export_path:
+        try:
+            display_df.to_csv(export_path, index=False)
+            print(f"\nExported {len(display_df)} records to {export_path}")
+        except Exception as exc:
+            print(f"\nCould not export to {export_path}: {exc}")
+
+    finalize_section(pause, clear=False)
+
+
 def run_help(pause: bool = True) -> None:
     print(
         """
@@ -1470,6 +1556,10 @@ horizon information.  On each run the tool attempts to fetch the actual price
 for previous targets so we accumulate real-world error metrics over time.
 Forecasts now also report a probability of closing within a configurable +/-
 band around each target based on recent volatility.
+
+Review mode: --action review reads memory/predictions_log.csv without running
+new forecasts. Combine it with --ticker/--period filters, --review-limit to
+cap the number of rows, and --review-export to save the filtered slice.
 
 Use the menu self-test option or --action selftest to run the engines against
 a synthetic dataset without requiring network connectivity.
@@ -1596,15 +1686,16 @@ def main_menu():
                 "2 → Plot price with SMA overlays (save or display)",
                 "3 → Download historical candles as a CSV export",
                 "4 → Forecast price movement (technical + ML + NN)",
-                "5 → Train from stored predictions for self-evaluation",
-                "6 → Help and usage guidance",
-                "7 → Diagnostics and environment checks",
-                "8 → Offline self-test using synthetic data",
-                "9 → Exit the analyzer",
+                "5 → Review recent prediction history",
+                "6 → Train from stored predictions for self-evaluation",
+                "7 → Help and usage guidance",
+                "8 → Diagnostics and environment checks",
+                "9 → Offline self-test using synthetic data",
+                "10 → Exit the analyzer",
             ],
         )
-        print("Enter the menu number (1-9) as a single digit.")
-        choice = input("Choice [1-9]: ").strip()
+        print("Enter the menu number (1-10).")
+        choice = input("Choice [1-10]: ").strip()
         if choice == "1":
             run_sma_report()
         elif choice == "2":
@@ -1614,14 +1705,16 @@ def main_menu():
         elif choice == "4":
             run_forecast_workflow()
         elif choice == "5":
-            run_training_workflow(loop=False)
+            run_review_workflow()
         elif choice == "6":
-            run_help()
+            run_training_workflow(loop=False)
         elif choice == "7":
-            run_diagnostics()
+            run_help()
         elif choice == "8":
-            run_self_test()
+            run_diagnostics()
         elif choice == "9":
+            run_self_test()
+        elif choice == "10":
             print("Goodbye!")
             break
         else:
@@ -1643,6 +1736,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
             "plot",
             "csv",
             "forecast",
+            "review",
             "train",
             "help",
             "diagnostics",
@@ -1681,6 +1775,18 @@ def build_arg_parser() -> argparse.ArgumentParser:
         type=float,
         help="Set the +/- band (in %) used to estimate hit probability around predictions.",
     )
+    parser.add_argument(
+        "--review-limit",
+        dest="review_limit",
+        type=int,
+        default=20,
+        help="Maximum number of prediction records to show during review (default: 20).",
+    )
+    parser.add_argument(
+        "--review-export",
+        dest="review_export",
+        help="Optional path to export filtered prediction history when using --action review.",
+    )
     return parser
 
 
@@ -1714,6 +1820,14 @@ def dispatch_cli_action(args) -> None:
             horizon=args.horizon,
             band=args.band,
             pause=False,
+        )
+    elif action == "review":
+        run_review_workflow(
+            pause=False,
+            ticker=args.ticker,
+            period=args.period,
+            limit=args.review_limit,
+            export_path=args.review_export,
         )
     elif action == "train":
         run_training_workflow(
