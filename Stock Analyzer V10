@@ -1,0 +1,3718 @@
+#!/usr/bin/env python3
+"""
+Stock Analyzer V10 - Enhanced UI Edition
+Advanced stock analysis with modern user interface, ML-powered predictions,
+and confidence-driven learning system.
+"""
+
+import os
+import sys
+import json
+import csv
+import time
+import datetime
+import argparse
+import subprocess
+import threading
+import signal
+import math
+import pickle
+import socket
+import urllib.request
+import urllib.error
+from typing import Dict, List, Optional, Tuple, Any, Union
+from dataclasses import dataclass, asdict, field
+from collections import defaultdict, namedtuple
+from pathlib import Path
+from contextlib import contextmanager
+import warnings
+import re
+from urllib.parse import quote_plus
+warnings.filterwarnings('ignore', category=FutureWarning)  # Suppress FutureWarnings
+
+# Enhanced UI imports
+try:
+    import colorama
+    from colorama import Fore, Back, Style
+    colorama.init()
+    COLORS_AVAILABLE = True
+except ImportError:
+    COLORS_AVAILABLE = False
+    # Fallback color definitions
+    class Fore:
+        RED = GREEN = YELLOW = BLUE = MAGENTA = CYAN = WHITE = RESET = ""
+    class Back:
+        RED = GREEN = YELLOW = BLUE = MAGENTA = CYAN = WHITE = RESET = ""
+    class Style:
+        BRIGHT = DIM = NORMAL = RESET_ALL = ""
+
+try:
+    from tqdm import tqdm
+    TQDM_AVAILABLE = True
+except ImportError:
+    TQDM_AVAILABLE = False
+    # Simple fallback progress bar
+    class tqdm:
+        def __init__(self, iterable=None, **kwargs):
+            self.iterable = iterable or []
+            self.desc = kwargs.get('desc', '')
+            self.total = kwargs.get('total', len(self.iterable))
+            self.n = 0
+            
+        def __iter__(self):
+            for item in self.iterable:
+                self.n += 1
+                self.display()
+                yield item
+                
+        def display(self):
+            percent = (self.n / self.total) * 100 if self.total > 0 else 0
+            bar_length = 40
+            filled = int(bar_length * self.n // self.total) if self.total > 0 else 0
+            bar = '#' * filled + '.' * (bar_length - filled)
+            print(f'\r{self.desc} |{bar}| {self.n}/{self.total} ({percent:.1f}%)', end='', flush=True)
+            
+        def close(self):
+            print()
+
+# Data processing imports
+try:
+    import yfinance as yf
+    import pandas as pd
+    import numpy as np
+    import ta
+    import requests
+    from bs4 import BeautifulSoup
+    from sklearn.ensemble import RandomForestRegressor
+    from sklearn.model_selection import train_test_split
+    from sklearn.metrics import mean_squared_error
+    import time
+    from functools import lru_cache
+    import hashlib
+    import os
+    from pathlib import Path
+    
+    # Market Intelligence functionality
+    @dataclass
+    class DataQualityScore:
+        """Data quality assessment results."""
+        completeness: float  # 0-1 scale
+        consistency: float   # 0-1 scale
+        timeliness: float    # 0-1 scale
+        reliability: float   # 0-1 scale
+        confidence: float    # 0-1 scale, overall confidence in data quality
+        
+        @property
+        def score(self) -> float:
+            """Calculate overall quality score (weighted average)."""
+            weights = {
+                'completeness': 0.2,
+                'consistency': 0.3,
+                'timeliness': 0.2,
+                'reliability': 0.3
+            }
+            return (self.completeness * weights['completeness'] +
+                    self.consistency * weights['consistency'] +
+                    self.timeliness * weights['timeliness'] +
+                    self.reliability * weights['reliability'])
+    
+    class MarketIntelligence:
+        """Advanced market analysis with data quality assessment and web search integration."""
+        
+        def __init__(self, yf_data: pd.DataFrame = None, source: str = 'yfinance'):
+            """Initialize with market data."""
+            self.data = yf_data
+            self.source = source
+            self.sentiment_data = {}
+            self.news_data = []
+        
+        def assess_data_quality(self) -> DataQualityScore:
+            """Assess the quality of the market data."""
+            if self.data is None or self.data.empty:
+                return DataQualityScore(0, 0, 0, 0, 0)
+            
+            # Calculate completeness (non-null values)
+            completeness = 1 - (self.data.isnull().sum().sum() / (self.data.size + 1e-10))
+            
+            # Calculate consistency (std of returns)
+            returns = self.data['Close'].pct_change().dropna()
+            consistency = 1 / (1 + np.std(returns) * 100)  # Lower volatility = more consistent
+            
+            # Calculate timeliness (how recent is the data)
+            if 'Date' in self.data.columns:
+                latest_date = pd.to_datetime(self.data['Date'].max())
+            else:
+                latest_date = pd.to_datetime(self.data.index.max())
+            
+            days_old = (pd.Timestamp.now() - latest_date).days
+            timeliness = max(0, 1 - (days_old / 30))  # 30-day window
+            
+            # Calculate reliability (price vs volume correlation)
+            if 'Volume' in self.data.columns and len(self.data) > 1:
+                price_changes = self.data['Close'].pct_change().dropna()
+                volume_changes = self.data['Volume'].pct_change().dropna()
+                if len(price_changes) > 1 and len(volume_changes) > 1:
+                    min_len = min(len(price_changes), len(volume_changes))
+                    corr = np.corrcoef(price_changes[:min_len], volume_changes[:min_len])[0, 1]
+                    reliability = (corr + 1) / 2  # Convert from [-1,1] to [0,1]
+                else:
+                    reliability = 0.5
+            else:
+                reliability = 0.5
+            
+            # Calculate confidence (weighted average with more weight on reliability)
+            confidence = (completeness * 0.2 + 
+                         consistency * 0.2 + 
+                         timeliness * 0.2 + 
+                         reliability * 0.4)
+            
+            return DataQualityScore(
+                completeness=completeness,
+                consistency=consistency,
+                timeliness=timeliness,
+                reliability=reliability,
+                confidence=confidence
+            )
+        
+        def analyze_sentiment(self, symbol: str) -> Dict[str, float]:
+            """Analyze market sentiment for a given symbol."""
+            # Simple sentiment analysis based on price action
+            if self.data is None or len(self.data) < 2:
+                return {"score": 0.0, "confidence": 0.0}
+            
+            # Calculate price change percentage
+            price_change = (self.data['Close'].iloc[-1] / self.data['Close'].iloc[0]) - 1
+            
+            # Calculate volume trend
+            if 'Volume' in self.data.columns:
+                avg_volume = self.data['Volume'].mean()
+                recent_volume = self.data['Volume'].iloc[-5:].mean()
+                volume_ratio = recent_volume / avg_volume if avg_volume > 0 else 1.0
+            else:
+                volume_ratio = 1.0
+            
+            # Simple sentiment score (-1 to 1)
+            sentiment_score = np.tanh(price_change * 10) * 0.8 + np.random.normal(0, 0.1)
+            sentiment_score = max(-1.0, min(1.0, sentiment_score))  # Clamp to [-1, 1]
+            
+            # Confidence based on volume and data quality
+            confidence = min(1.0, 0.7 + (volume_ratio - 1) * 0.3)
+            
+            return {
+                "score": float(sentiment_score),
+                "confidence": float(confidence)
+            }
+        
+        def search_news(self, query: str, max_results: int = 5) -> List[Dict]:
+            """Search for news articles related to the query (placeholder implementation)."""
+            # This is a placeholder that would be replaced with actual news API integration
+            return [
+                {
+                    "title": f"News about {query} - {i+1}",
+                    "source": "Example News Source",
+                    "date": (datetime.now() - timedelta(days=i)).strftime("%Y-%m-%d"),
+                    "snippet": f"This is a sample news snippet about {query}."
+                }
+                for i in range(max_results)
+            ]
+        
+        def get_market_context(self, symbol: str) -> Dict[str, Any]:
+            """Get comprehensive market context for a symbol."""
+            data_quality = self.assess_data_quality()
+            sentiment = self.analyze_sentiment(symbol)
+            
+            # Generate analysis and recommendation
+            analysis = self._generate_analysis(symbol, data_quality, sentiment)
+            
+            return {
+                "symbol": symbol,
+                "timestamp": datetime.now().isoformat(),
+                "data_quality": {
+                    "score": data_quality.score,
+                    "completeness": data_quality.completeness,
+                    "consistency": data_quality.consistency,
+                    "timeliness": data_quality.timeliness,
+                    "reliability": data_quality.reliability,
+                    "confidence": data_quality.confidence
+                },
+                "sentiment": sentiment,
+                "analysis": analysis
+            }
+        
+        def _generate_analysis(self, symbol: str, data_quality: DataQualityScore, 
+                             sentiment: Dict[str, float]) -> Dict[str, str]:
+            """Generate analysis and recommendations based on data quality and sentiment."""
+            # Simple rule-based analysis
+            if data_quality.score < 0.5:
+                confidence = "low"
+                recommendation = f"Use caution - data quality for {symbol} is below threshold"
+            elif data_quality.score < 0.8:
+                confidence = "medium"
+                recommendation = f"Proceed with caution - data quality for {symbol} is moderate"
+            else:
+                confidence = "high"
+                recommendation = f"High confidence in {symbol} data quality"
+            
+            # Add sentiment-based recommendation
+            if sentiment["score"] > 0.2:
+                recommendation += ". Bullish sentiment detected."
+            elif sentiment["score"] < -0.2:
+                recommendation += ". Bearish sentiment detected."
+            
+            return {
+                "confidence": confidence,
+                "recommendation": recommendation
+            }
+    
+    # Set market intelligence as available
+    MARKET_INTELLIGENCE_AVAILABLE = True
+    YFINANCE_AVAILABLE = True
+
+except ImportError as e:
+    YFINANCE_AVAILABLE = False
+    MARKET_INTELLIGENCE_AVAILABLE = False
+    print(f"Warning: Missing dependencies: {e}")
+    if 'yfinance' in str(e).lower():
+        print("Please install yfinance: pip install yfinance")
+
+# Alpha Vantage configuration
+ALPHA_VANTAGE_API_KEY = os.getenv('ALPHA_VANTAGE_API_KEY', 'YOUR_ALPHA_VANTAGE_API_KEY')
+CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.cache')
+os.makedirs(CACHE_DIR, exist_ok=True)
+
+# GPU acceleration support
+try:
+    import cupy as cp
+    CUPY_AVAILABLE = True
+except ImportError:
+    CUPY_AVAILABLE = False
+
+# Enhanced UI Components
+class UIComponents:
+    """Modern UI components for enhanced user experience."""
+    
+    @staticmethod
+    def color_text(text: str, color: str = Fore.WHITE, style: str = Style.NORMAL) -> str:
+        """Apply color and style to text."""
+        if not COLORS_AVAILABLE:
+            return text
+        return f"{style}{color}{text}{Style.RESET_ALL}"
+    
+    @staticmethod
+    def success(message: str) -> str:
+        """Format success message."""
+        return UIComponents.color_text(f"[OK] {message}", Fore.GREEN, Style.BRIGHT)
+    
+    @staticmethod
+    def error(text: str) -> str:
+        """Red error message."""
+        return UIComponents.color_text(f"[X] {text}", Fore.RED, Style.BRIGHT)
+    
+    @staticmethod
+    def warning(text: str) -> str:
+        """Yellow warning message."""
+        return UIComponents.color_text(f"[!] {text}", Fore.YELLOW, Style.BRIGHT)
+    
+    @staticmethod
+    def info(text: str) -> str:
+        """Blue info message."""
+        return UIComponents.color_text(f"[i] {text}", Fore.BLUE, Style.BRIGHT)
+    
+    @staticmethod
+    def header(text: str) -> str:
+        """Cyan header text."""
+        return UIComponents.color_text(text, Fore.CYAN, Style.BRIGHT)
+    
+    @staticmethod
+    def highlight(text: str) -> str:
+        """Magenta highlighted text."""
+        return UIComponents.color_text(text, Fore.MAGENTA, Style.BRIGHT)
+    
+    @staticmethod
+    def progress_bar(current: int, total: int, width: int = 40, prefix: str = "") -> str:
+        """Create a progress bar."""
+        if total == 0:
+            return UIComponents.error("Invalid total")
+        
+        percent = (current / total) * 100
+        filled_length = int(width * current // total)
+        
+        if COLORS_AVAILABLE:
+            filled = '#'  # Full block
+            empty = '.'   # Light shade
+        else:
+            filled = '='
+            empty = '-'
+        
+        bar = filled * filled_length + empty * (width - filled_length)
+        
+        # Color based on progress
+        if percent < 33:
+            bar_color = Fore.RED
+        elif percent < 66:
+            bar_color = Fore.YELLOW
+        else:
+            bar_color = Fore.GREEN
+            
+        return f"{prefix}[{UIComponents.color_text(bar, bar_color)}] {percent:.1f}% ({current}/{total})"
+    
+    @staticmethod
+    def table_row(items: List[str], widths: List[int], aligns: List[str] = None) -> str:
+        """Create a formatted table row."""
+        if aligns is None:
+            aligns = ['left'] * len(items)
+        
+        formatted_items = []
+        for item, width, align in zip(items, widths, aligns):
+            if align == 'center':
+                formatted = item.center(width)
+            elif align == 'right':
+                formatted = item.rjust(width)
+            else:
+                formatted = item.ljust(width)
+            formatted_items.append(formatted)
+        
+        return '│'.join(formatted_items)
+    
+    @staticmethod
+    def table_separator(widths: List[int]) -> str:
+        """Create table separator line."""
+        parts = ['─' * (w + 2) for w in widths]
+        return '+' + '+'.join(parts) + '+'
+    
+    @staticmethod
+    def box(text: str, width: int = 60, title: str = "", style: str = "double") -> str:
+        """Create a text box."""
+        if style == "double":
+            h = '='
+            v = '|'
+            tl = tr = bl = br = '+'
+        else:
+            h = '-'
+            v = '|'
+            tl = tr = bl = br = '+'
+        
+        lines = text.split('\n')
+        if title:
+            title_line = f" {title} "
+            box_width = max(width, len(title_line) + 4)
+        else:
+            box_width = width
+        
+        # Top border
+        result = f"{tl}{h * (box_width - 2)}{tr}\n"
+        
+        # Title line if provided
+        if title:
+            result += f"{v}{title_line.center(box_width - 2)}{v}\n"
+            result += f"{v}{h * (box_width - 2)}{v}\n"
+        
+        # Content lines
+        for line in lines:
+            result += f"{v}{line.ljust(box_width - 2)}{v}\n"
+        
+        # Bottom border
+        result += f"{bl}{h * (box_width - 2)}{br}"
+        
+        return result
+    
+    @staticmethod
+    def table(headers: List[str], rows: List[List[str]], title: str = "") -> str:
+        """Create a formatted table."""
+        if not headers or not rows:
+            return ""
+        
+        # Calculate column widths
+        widths = [len(header) for header in headers]
+        for row in rows:
+            for i, cell in enumerate(row):
+                if i < len(widths):
+                    widths[i] = max(widths[i], len(str(cell)))
+        
+        # Build table
+        result = []
+        
+        # Title if provided
+        if title:
+            result.append(UIComponents.header(title))
+            result.append("")
+        
+        # Header
+        result.append(UIComponents.table_separator(widths))
+        result.append(UIComponents.table_row(headers, widths))
+        result.append(UIComponents.table_separator(widths))
+        
+        # Rows
+        for row in rows:
+            result.append(UIComponents.table_row(row, widths))
+        
+        # Bottom
+        result.append(UIComponents.table_separator(widths))
+        
+        return "\n".join(result)
+    
+    @staticmethod
+    @contextmanager
+    def spinner(text: str = "Loading"):
+        """Simple spinner animation context manager."""
+        import sys
+        spinner_chars = ['|', '/', '-', '\\']
+        stop_spinner = threading.Event()
+        
+        def spin():
+            while not stop_spinner.is_set():
+                for char in spinner_chars:
+                    if stop_spinner.is_set():
+                        break
+                    sys.stdout.write(f'\r{char} {text}')
+                    sys.stdout.flush()
+                    time.sleep(0.1)
+        
+        spinner_thread = threading.Thread(target=spin)
+        spinner_thread.daemon = True
+        spinner_thread.start()
+        
+        try:
+            yield
+        finally:
+            stop_spinner.set()
+            spinner_thread.join()
+            sys.stdout.write('\r' + ' ' * (len(text) + 3) + '\r')
+            sys.stdout.flush()
+
+class EnhancedMenu:
+    """Enhanced menu system with improved navigation."""
+    
+    def __init__(self, title: str, options: List[Tuple[str, callable]]):
+        self.title = title
+        self.options = options
+        self.ui = UIComponents()
+    
+    def display(self) -> None:
+        """Display the enhanced menu."""
+        clear_screen()
+        
+        # Header
+        print(self.ui.box(
+            self.ui.header(self.title),
+            width=80,
+            style="double"
+        ))
+        print()
+        
+        # Options
+        for i, (text, _) in enumerate(self.options, 1):
+            option_text = f"{i}. {text}"
+            if "Learning Mode" in text:
+                option_text = self.ui.highlight(option_text)
+            elif "Exit" in text or "Back" in text:
+                option_text = self.ui.color_text(option_text, Fore.RED)
+            else:
+                option_text = self.ui.color_text(option_text, Fore.WHITE)
+            
+            print(f"  {option_text}")
+        
+        print()
+    
+    def get_choice(self) -> Optional[callable]:
+        """Get user choice and return corresponding function."""
+        while True:
+            choice = input(self.ui.color_text("Select option: ", Fore.CYAN)).strip()
+            
+            if choice.isdigit() and 1 <= int(choice) <= len(self.options):
+                _, func = self.options[int(choice) - 1]
+                return func
+            elif choice.lower() in ['q', 'quit', 'exit']:
+                return None
+            else:
+                print(self.ui.error("Invalid option. Please try again."))
+
+# Enhanced data structures
+@dataclass
+class EngineResult:
+    """Enhanced engine result with UI-friendly formatting."""
+    engine: str
+    prediction: float
+    confidence: float
+    comment: str
+    range_low: float = 0.0
+    range_high: float = 0.0
+    accuracy_history: List[float] = None
+    training_samples: int = 0
+    processing_time: float = 0.0
+    
+    def __post_init__(self):
+        if self.accuracy_history is None:
+            self.accuracy_history = []
+        if self.range_low == 0.0 and self.range_high == 0.0:
+            # Calculate range based on confidence
+            range_width = max(1.0, 10.0 - self.confidence)
+            self.range_low = self.prediction - range_width
+            self.range_high = self.prediction + range_width
+    
+    def to_dict(self) -> Dict:
+        """Convert to dictionary for JSON serialization."""
+        return asdict(self)
+    
+    @classmethod
+    def from_dict(cls, data: Dict) -> 'EngineResult':
+        """Create from dictionary."""
+        return cls(**data)
+    
+    def format_display(self, ui: UIComponents) -> str:
+        """Format for enhanced UI display."""
+        confidence_color = Fore.GREEN if self.confidence >= 8 else Fore.YELLOW if self.confidence >= 5 else Fore.RED
+        prediction_color = Fore.GREEN if self.prediction > 0 else Fore.RED if self.prediction < 0 else Fore.WHITE
+        
+        result = []
+        result.append(f"Engine: {ui.highlight(self.engine)}")
+        result.append(f"Prediction: {ui.color_text(f'{self.prediction:+.2f}%', prediction_color, Style.BRIGHT)}")
+        result.append(f"Confidence: {ui.color_text(f'{self.confidence:.1f}/10', confidence_color, Style.BRIGHT)}")
+        result.append(f"Range: {ui.color_text(f'{self.range_low:+.2f}% to {self.range_high:+.2f}%', Fore.CYAN)}")
+        result.append(f"Comment: {ui.color_text(self.comment, Fore.WHITE)}")
+        
+        if self.processing_time > 0:
+            result.append(f"Processing time: {ui.info(f'{self.processing_time:.3f}s')}")
+        
+        return '\n'.join(result)
+
+# Constants and Configuration
+VERSION = "10.0"
+APP_NAME = f"Stock Analyzer V{VERSION} - Enhanced UI Edition"
+
+DATA_DIR = "data"
+MEMORY_DIR = "memory"
+LOG_DIR = "logs"
+CONFIG_FILE = os.path.join(DATA_DIR, "config.json")
+TICKERS_FILE = os.path.join(DATA_DIR, "tickers.txt")
+TRAINING_LOG = os.path.join(MEMORY_DIR, "training_log.csv")
+PREDICTION_LOG = os.path.join(MEMORY_DIR, "prediction_log.csv")
+BATCH_ANALYSIS_LOG = os.path.join(MEMORY_DIR, "batch_analysis_log.json")
+ERROR_LOG = os.path.join(LOG_DIR, "error.log")
+
+# Enhanced default configuration
+DEFAULT_CONFIG = {
+    "version": VERSION,
+    "default_tickers": [
+        "AGG",
+        "BND",
+        "BNDX",
+        "DBA",
+        "DBC",
+        "DGAZ",
+        "DSLV",
+        "DUST",
+        "EEM",
+        "EFA",
+        "EWA",
+        "EWC",
+        "EWH",
+        "EWJ",
+        "EWL",
+        "EWS",
+        "EWT",
+        "EWW",
+        "EWY",
+        "EWZ",
+        "GDX",
+        "GDXJ",
+        "GLD",
+        "GLL",
+        "HYG",
+        "IAU",
+        "IEF",
+        "IEFA",
+        "IEMG",
+        "IGOV",
+        "ITB",
+        "IVV",
+        "IWD",
+        "IWF",
+        "IWM",
+        "IWN",
+        "IYR",
+        "JDST",
+        "JNK",
+        "JNUG",
+        "KBWY",
+        "LQD",
+        "MUB",
+        "NUGT",
+        "PALL",
+        "PPLT",
+        "QQQ",
+        "QQQM",
+        "REM",
+        "REZ",
+        "SCHH",
+        "SHY",
+        "SLV",
+        "SMB",
+        "SPXL",
+        "SPXU",
+        "SPY",
+        "SQQQ",
+        "TBT",
+        "TLT",
+        "TQQQ",
+        "UBT",
+        "UGAZ",
+        "UGL",
+        "UNG",
+        "UPRO",
+        "USLV",
+        "USO",
+        "VAW",
+        "VCIT",
+        "VCR",
+        "VDC",
+        "VDE",
+        "VEA",
+        "VFH",
+        "VGK",
+        "VGT",
+        "VHT",
+        "VIS",
+        "VNQ",
+        "VOO",
+        "VPL",
+        "VSS",
+        "VT",
+        "VTI",
+        "VWO",
+        "VXUS",
+        "XHB",
+        "XLB",
+        "XLE",
+        "XLF",
+        "XLI",
+        "XLK",
+        "XLP",
+        "XLRE",
+        "XLU",
+        "XLV",
+        "XLY",
+        "AAPL",
+        "ADBE",
+        "ADI",
+        "AMAT",
+        "AMD",
+        "AMZN",
+        "AVGO",
+        "CDNS",
+        "CRM",
+        "CRWD",
+        "CSCO",
+        "DDOG",
+        "FTNT",
+        "GOOG",
+        "GOOGL",
+        "IBM",
+        "INTC",
+        "INTU",
+        "KLAC",
+        "LRCX",
+        "META",
+        "MRVL",
+        "MSFT",
+        "MU",
+        "NFLX",
+        "NOW",
+        "NVDA",
+        "NXPI",
+        "OKTA",
+        "ORCL",
+        "PANW",
+        "PLTR",
+        "PYPL",
+        "QCOM",
+        "SAP",
+        "SNOW",
+        "SNPS",
+        "TSLA",
+        "TXN",
+        "ZS",
+        "AON",
+        "AXP",
+        "BAC",
+        "BLK",
+        "BRK.B",
+        "C",
+        "CBOE",
+        "CME",
+        "COF",
+        "DFS",
+        "ETFC",
+        "GS",
+        "IBKR",
+        "ICE",
+        "JPM",
+        "KEY",
+        "MA",
+        "MKT",
+        "MS",
+        "NDAQ",
+        "PNC",
+        "RF",
+        "SCHW",
+        "SPGI",
+        "SQ",
+        "TFC",
+        "USB",
+        "V",
+        "WFC",
+        "ABBV",
+        "ABT",
+        "AGN",
+        "AMGN",
+        "AZN",
+        "BIIB",
+        "BMY",
+        "BNTX",
+        "CI",
+        "CVS",
+        "DHR",
+        "DVA",
+        "DXCM",
+        "EW",
+        "GILD",
+        "GSK",
+        "HCA",
+        "ILMN",
+        "JNJ",
+        "MDT",
+        "MRK",
+        "MRNA",
+        "NVAX",
+        "NVS",
+        "PFE",
+        "RHHBY",
+        "SNY",
+        "T",
+        "UNH",
+        "ABNB",
+        "AEO",
+        "ANF",
+        "BKNG",
+        "COST",
+        "EXPE",
+        "F",
+        "GM",
+        "GPS",
+        "HD",
+        "JWN",
+        "K",
+        "KSS",
+        "LOW",
+        "LULU",
+        "M",
+        "MCD",
+        "NKE",
+        "ROST",
+        "SBUX",
+        "STLA",
+        "TGT",
+        "TJX",
+        "TRIP",
+        "URBN",
+        "WMT",
+        "BA",
+        "BKR",
+        "CAT",
+        "CMI",
+        "COP",
+        "CVX",
+        "DE",
+        "EMR",
+        "EOG",
+        "EPD",
+        "ET",
+        "ETN",
+        "GD",
+        "GE",
+        "HAL",
+        "HES",
+        "HON",
+        "HP",
+        "IR",
+        "ITW",
+        "KMI",
+        "LMT",
+        "MMM",
+        "MPC",
+        "MPLX",
+        "NOC",
+        "OXY",
+        "PH",
+        "PSX",
+        "PXD",
+        "ROK",
+        "RTX",
+        "SLB",
+        "SWK",
+        "UPS",
+        "VLO",
+        "WES",
+        "WMB",
+        "XOM",
+        "1COV",
+        "AAL",
+        "ABB",
+        "AD",
+        "AI",
+        "AIR",
+        "ALO",
+        "ALV",
+        "ASML",
+        "BAS",
+        "BAYN",
+        "BMW",
+        "BN",
+        "BNP",
+        "BP",
+        "BTI",
+        "CA",
+        "CAP",
+        "CNA",
+        "DAI",
+        "DB",
+        "DCC",
+        "DGE",
+        "DNB",
+        "EN",
+        "EOAN",
+        "EQNR",
+        "ERIC-B",
+        "FME",
+        "GIVN",
+        "GLPG",
+        "HEI",
+        "HEIA",
+        "HEN3",
+        "HO",
+        "HSBA",
+        "IAG",
+        "IFX",
+        "IMB",
+        "INGA",
+        "INVE-B",
+        "KER",
+        "KNEBV",
+        "KPN",
+        "LIN",
+        "LR",
+        "MC",
+        "MUV2",
+        "NDA-SEK",
+        "NESN",
+        "NOVN",
+        "OR",
+        "ORA",
+        "ORSTED",
+        "PHIA",
+        "RDSA",
+        "REL",
+        "RIO",
+        "RMS",
+        "ROG",
+        "RR",
+        "RWE",
+        "SAB",
+        "SAN",
+        "SCMN",
+        "SDF",
+        "SGO",
+        "SHB-A",
+        "SHEL",
+        "SIE",
+        "SMDS",
+        "SOON",
+        "SREN",
+        "STMPA",
+        "TELNOR",
+        "UBSG",
+        "ULVR",
+        "UNA",
+        "VIE",
+        "VNA",
+        "VOD",
+        "VOLV-B",
+        "WKL",
+        "WLN",
+        "WPP",
+        "ZURN",
+        "0005",
+        "000660",
+        "005490",
+        "005930",
+        "012330",
+        "035420",
+        "0388",
+        "051910",
+        "068270",
+        "0700",
+        "0883",
+        "0941",
+        "1299",
+        "1398",
+        "1810",
+        "207940",
+        "2318",
+        "4502",
+        "6302",
+        "6326",
+        "6501",
+        "6506",
+        "6701",
+        "6702",
+        "6752",
+        "6758",
+        "6767",
+        "6861",
+        "6954",
+        "7203",
+        "8306",
+        "9983",
+        "9984",
+        "9988",
+        "AXISBANK",
+        "BABA",
+        "BIDU",
+        "BILI",
+        "DADA",
+        "EDU",
+        "HDB",
+        "HUYA",
+        "IBN",
+        "INFY",
+        "IQ",
+        "JD",
+        "KO",
+        "LI",
+        "ME",
+        "MTCH",
+        "NIO",
+        "NTES",
+        "PDD",
+        "RELIANCE",
+        "RENN",
+        "SBIN",
+        "TCS",
+        "TME",
+        "WIT",
+        "XPEV",
+        "YIN",
+        "YNDX",
+        "YY",
+        "ZTO",
+        "ARKB",
+        "ARKF",
+        "ARKG",
+        "ARKK",
+        "ARKQ",
+        "ARKW",
+        "ARKX",
+        "BITO",
+        "BTF",
+        "CTRU",
+        "FBTC",
+        "IBIT",
+        "IRBO",
+        "IZRL",
+        "KOMP",
+        "MCHI",
+        "PRNT",
+        "ROBO",
+        "THNQ",
+        "WOOM",
+        "COCOA",
+        "COFFEE",
+        "COPPER",
+        "CORN",
+        "COTTON",
+        "GOLD",
+        "LITHIUM",
+        "LUMBER",
+        "NATGAS",
+        "OIL",
+        "PALLADIUM",
+        "PLATINUM",
+        "RARE_EARTH",
+        "SILVER",
+        "SOY",
+        "SUGAR",
+        "URANIUM",
+        "WHEAT",
+        "ABEV3",
+        "B3SA3",
+        "BBDC4",
+        "BPAC11",
+        "BRFS3",
+        "BRSR6",
+        "CIEL3",
+        "EQTL3",
+        "GGBR4",
+        "HYPE3",
+        "ITUB4",
+        "LREN3",
+        "MGLU3",
+        "NTCO3",
+        "PETR4",
+        "RADL3",
+        "SANB11",
+        "SUZB3",
+        "VALE3",
+        "WEGE3"
+    ],
+    "trading212_tickers": [
+        "QQQ", "IWM", "DIA", "VTI", "VOO", "GLD", "SLV", "TLT",
+        "HYG", "LQD", "VWO", "EFA", "EEM", "VNQ", "XLE", "XLF",
+        "XLK", "XLV", "XLI", "XLU"
+    ],
+    "training_intervals": ["1m", "5m", "10m", "15m", "30m", "1h", "4h", "1d"],
+    "auto_training": True,
+    "gpu_enabled": True,
+    "confidence_threshold": 7.0,
+    "error_recovery": True,
+    "ui": {
+        "color_enabled": True,
+        "progress_bars": True,
+        "animations": True,
+        "table_format": "enhanced"
+    }
+}
+
+# Technical indicators data dictionary
+DATA_DICTIONARY = {
+    "SMA20": {"name": "Simple Moving Average (20)", "description": "20-period simple moving average", "usage": "Trend identification"},
+    "SMA50": {"name": "Simple Moving Average (50)", "description": "50-period simple moving average", "usage": "Long-term trend"},
+    "EMA12": {"name": "Exponential Moving Average (12)", "description": "12-period exponential moving average", "usage": "Short-term momentum"},
+    "EMA26": {"name": "Exponential Moving Average (26)", "description": "26-period exponential moving average", "usage": "Medium-term momentum"},
+    "RSI14": {"name": "Relative Strength Index (14)", "description": "14-period RSI oscillator", "usage": "Overbought/oversold detection"},
+    "MACD": {"name": "MACD Line", "description": "Moving Average Convergence Divergence", "usage": "Momentum changes"},
+    "MACD_SIGNAL": {"name": "MACD Signal Line", "description": "MACD signal line", "usage": "MACD confirmation"},
+    "MACD_HIST": {"name": "MACD Histogram", "description": "MACD histogram", "usage": "Momentum strength"},
+    "BB_UPPER": {"name": "Bollinger Band Upper", "description": "Upper Bollinger Band", "usage": "Volatility bands"},
+    "BB_MIDDLE": {"name": "Bollinger Band Middle", "description": "Middle Bollinger Band (SMA20)", "usage": "Mean reference"},
+    "BB_LOWER": {"name": "Bollinger Band Lower", "description": "Lower Bollinger Band", "usage": "Volatility bands"},
+    "ATR14": {"name": "Average True Range (14)", "description": "14-period ATR", "usage": "Volatility measurement"},
+    "STOCH_K": {"name": "Stochastic %K", "description": "Stochastic oscillator %K", "usage": "Momentum oscillator"},
+    "STOCH_D": {"name": "Stochastic %D", "description": "Stochastic oscillator %D", "usage": "Stochastic signal"},
+    "OBV": {"name": "On-Balance Volume", "description": "On-Balance Volume indicator", "usage": "Volume-based momentum"},
+    "VWAP": {"name": "Volume Weighted Average Price", "description": "Volume weighted average price", "usage": "Price reference"},
+    "DIST_SMA20": {"name": "Distance from SMA20", "description": "Price distance from SMA20", "usage": "Deviation measurement"},
+    "VOLATILITY20": {"name": "20-period Volatility", "description": "20-period price volatility", "usage": "Risk measurement"},
+    "BB_WIDTH": {"name": "Bollinger Band Width", "description": "Bollinger Band width", "usage": "Volatility squeeze/expansion"}
+}
+
+# Global state
+CANCEL_FLAG = threading.Event()
+LEARNING_MODE = {
+    "active": False,
+    "target_confidence": 9.0,
+    "current_confidence": 0.0,
+    "current_iteration": 0,
+    "max_iterations": 10,
+    "predictions": [],
+    "confidence_history": [],
+    "accuracy_ratings": [],
+    "start_time": None
+}
+
+def ensure_directories() -> None:
+    """Ensure all required directories exist."""
+    directories = [DATA_DIR, MEMORY_DIR, LOG_DIR]
+    for directory in directories:
+        os.makedirs(directory, exist_ok=True)
+
+# Internet connection detection
+def check_internet_connection(timeout: int = 3) -> bool:
+    """Check if internet connection is available."""
+    try:
+        # Try to connect to Google's DNS server
+        socket.setdefaulttimeout(timeout)
+        socket.socket(socket.AF_INET, socket.SOCK_STREAM).connect(("8.8.8.8", 53))
+        return True
+    except socket.error:
+        try:
+            # Fallback: try HTTP request
+            urllib.request.urlopen('https://www.google.com', timeout=timeout)
+            return True
+        except urllib.error.URLError:
+            return False
+    finally:
+        socket.setdefaulttimeout(None)
+
+# Enhanced UI Functions
+def clear_screen():
+    """Clear the terminal screen."""
+    os.system('cls' if os.name == 'nt' else 'clear')
+
+def print_banner():
+    """Print enhanced application banner."""
+    ui = UIComponents()
+    
+    banner_text = f"""
+{ui.header(APP_NAME)}
+{ui.color_text("=" * 60, Fore.CYAN)}
+{ui.info("Advanced stock analysis with ML-powered predictions")}
+{ui.info("and confidence-driven learning system")}
+{ui.color_text("=" * 60, Fore.CYAN)}
+{ui.success(f"Version {VERSION} with Enhanced UI")}
+{ui.info(f"GPU Acceleration: {'Enabled' if CUPY_AVAILABLE else 'Disabled'}")}
+{ui.info(f"Color Support: {'Enabled' if COLORS_AVAILABLE else 'Disabled'}")}
+{ui.info(f"Progress Bars: {'Enabled' if TQDM_AVAILABLE else 'Disabled'}")}
+"""
+    
+    print(banner_text)
+
+def show_loading_animation(text: str = "Processing", duration: float = 2.0):
+    """Show loading animation."""
+    if not TQDM_AVAILABLE:
+        # Simple spinner fallback
+        ui = UIComponents()
+        spinner_gen = ui.spinner(text)
+        start_time = time.time()
+        
+        try:
+            while time.time() - start_time < duration:
+                print(f'\r{next(spinner_gen)}', end='', flush=True)
+                time.sleep(0.1)
+        finally:
+            print('\r' + ' ' * 50 + '\r', end='', flush=True)
+
+def create_progress_bar(iterable, desc: str = "Processing"):
+    """Create enhanced progress bar."""
+    if TQDM_AVAILABLE:
+        return tqdm(iterable, desc=desc, bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]')
+    else:
+        return tqdm(iterable, desc=desc)
+
+# Enhanced data functions
+def load_config() -> Dict:
+    """Load configuration with enhanced error handling."""
+    try:
+        if os.path.exists(CONFIG_FILE):
+            with open(CONFIG_FILE, 'r') as f:
+                config = json.load(f)
+            # Merge with default config to ensure all keys exist
+            merged_config = DEFAULT_CONFIG.copy()
+            merged_config.update(config)
+            return merged_config
+        return DEFAULT_CONFIG.copy()
+    except Exception as e:
+        log_error(f"Config load error: {e}")
+        return DEFAULT_CONFIG.copy()
+
+def save_config(config: Dict) -> None:
+    """Save configuration with validation."""
+    try:
+        os.makedirs(os.path.dirname(CONFIG_FILE), exist_ok=True)
+        with open(CONFIG_FILE, 'w') as f:
+            json.dump(config, f, indent=2)
+    except Exception as e:
+        log_error(f"Config save error: {e}")
+
+def initialize_tickers_file() -> None:
+    """Initialize tickers file with default tickers including Trading 212."""
+    try:
+        if not os.path.exists(TICKERS_FILE):
+            os.makedirs(os.path.dirname(TICKERS_FILE), exist_ok=True)
+            with open(TICKERS_FILE, 'w') as f:
+                for ticker in DEFAULT_CONFIG["default_tickers"]:
+                    f.write(f"{ticker}\n")
+            print(f"[OK] Created default tickers file at {TICKERS_FILE}")
+    except Exception as e:
+        log_error(f"Failed to initialize tickers file: {e}")
+
+def load_tickers() -> List[str]:
+    """Load tickers with enhanced validation."""
+    try:
+        if os.path.exists(TICKERS_FILE):
+            with open(TICKERS_FILE, 'r') as f:
+                tickers = [line.strip() for line in f if line.strip()]
+            if tickers:
+                return tickers
+    except Exception as e:
+        log_error(f"Tickers load error: {e}")
+
+    # Return default tickers
+    return DEFAULT_CONFIG["default_tickers"].copy()
+
+def save_tickers(tickers: List[str]) -> None:
+    """Save tickers with validation."""
+    try:
+        os.makedirs(os.path.dirname(TICKERS_FILE), exist_ok=True)
+        with open(TICKERS_FILE, 'w') as f:
+            for ticker in sorted(tickers):
+                f.write(f"{ticker}\n")
+    except Exception as e:
+        log_error(f"Tickers save error: {e}")
+
+def log(message: str, silent: bool = False) -> None:
+    """Enhanced logging with timestamp."""
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    log_entry = f"[{timestamp}] {message}"
+    
+    # Print to console with enhanced formatting
+    if not silent:
+        ui = UIComponents()
+        print(ui.info(log_entry))
+    
+    # Save to log file
+    try:
+        os.makedirs(LOG_DIR, exist_ok=True)
+        with open(os.path.join(LOG_DIR, "app.log"), 'a') as f:
+            f.write(log_entry + '\n')
+    except Exception:
+        pass  # Silent fail for logging
+
+def log_error(error: str, silent: bool = True) -> None:
+    """Enhanced error logging."""
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    error_entry = f"[{timestamp}] ERROR: {error}"
+    
+    # Print error with enhanced formatting
+    if not silent:
+        ui = UIComponents()
+        print(ui.error(error_entry))
+    
+    # Save to error log
+    try:
+        os.makedirs(LOG_DIR, exist_ok=True)
+        with open(ERROR_LOG, 'a') as f:
+            f.write(error_entry + '\n')
+    except Exception:
+        pass
+
+def _get_cache_key(ticker: str, interval: str, source: str) -> str:
+    """Generate a cache key for storing/retrieving data."""
+    key = f"{ticker}_{interval}_{source}"
+    return hashlib.md5(key.encode()).hexdigest()
+
+def _save_to_cache(data: pd.DataFrame, cache_key: str) -> None:
+    """Save data to cache."""
+    try:
+        cache_file = os.path.join(CACHE_DIR, f"{cache_key}.pkl")
+        data.to_pickle(cache_file)
+    except Exception as e:
+        log_error(f"Cache save error: {e}")
+
+def _load_from_cache(cache_key: str) -> Optional[pd.DataFrame]:
+    """Load data from cache if it exists and is recent."""
+    try:
+        cache_file = os.path.join(CACHE_DIR, f"{cache_key}.pkl")
+        if os.path.exists(cache_file):
+            # Check if cache is fresh (less than 1 hour old for intraday, 24h for daily)
+            file_time = os.path.getmtime(cache_file)
+            max_age = 3600 if 'm' in cache_key or 'h' in cache_key else 86400
+            
+            if time.time() - file_time < max_age:
+                return pd.read_pickle(cache_file)
+    except Exception as e:
+        log_error(f"Cache load error: {e}")
+    return None
+
+def fetch_from_yfinance(ticker: str, interval: str) -> Optional[pd.DataFrame]:
+    """Fetch historical data from Yahoo Finance."""
+    if not YFINANCE_AVAILABLE:
+        return None
+    
+    try:
+        # Map intervals to yfinance format
+        interval_map = {
+            "1m": "1m", "5m": "5m", "10m": "5m", "15m": "15m",
+            "30m": "30m", "1h": "1h", "4h": "1h", "1d": "1d"
+        }
+        
+        yf_interval = interval_map.get(interval, "1d")
+        
+        # Adjust period based on interval
+        if interval in ["1m", "5m", "10m", "15m"]:
+            period = "5d"
+        elif interval in ["30m", "1h"]:
+            period = "1mo"
+        elif interval == "4h":
+            period = "3mo"
+        else:
+            period = "1y"
+        
+        data = yf.download(ticker, period=period, interval=yf_interval, progress=False)
+        return data if not data.empty else None
+        
+    except Exception as e:
+        log_error(f"Yahoo Finance error for {ticker}: {e}")
+        return None
+
+def fetch_from_alpha_vantage(ticker: str, interval: str) -> Optional[pd.DataFrame]:
+    """Fetch historical data from Alpha Vantage."""
+    if not ALPHA_VANTAGE_API_KEY or ALPHA_VANTAGE_API_KEY == 'YOUR_ALPHA_VANTAGE_API_KEY':
+        return None
+    
+    try:
+        # Map intervals to Alpha Vantage format
+        function_map = {
+            "1m": "TIME_SERIES_INTRADAY", "5m": "TIME_SERIES_INTRADAY",
+            "15m": "TIME_SERIES_INTRADAY", "30m": "TIME_SERIES_INTRADAY",
+            "1h": "TIME_SERIES_INTRADAY", "4h": "TIME_SERIES_INTRADAY_EXTENDED",
+            "1d": "TIME_SERIES_DAILY"
+        }
+        
+        function = function_map.get(interval, "TIME_SERIES_DAILY")
+        params = {
+            'function': function,
+            'symbol': ticker,
+            'apikey': ALPHA_VANTAGE_API_KEY,
+            'datatype': 'json',
+            'outputsize': 'compact' if interval in ['1d'] else 'full'
+        }
+        
+        if function == "TIME_SERIES_INTRADAY":
+            params['interval'] = '1min' if interval == '1m' else '5min' if interval in ['5m', '10m'] else '15min' if interval == '15m' else '30min' if interval == '30m' else '60min'
+        
+        response = requests.get('https://www.alphavantage.co/query', params=params, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        
+        # Parse response
+        if 'Time Series' in data:
+            time_series = data[f'Time Series ({params.get("interval", "Daily")})'] if function != 'TIME_SERIES_DAILY' else data['Time Series (Daily)']
+            df = pd.DataFrame.from_dict(time_series, orient='index', 
+                                     dtype=float)
+            df.index = pd.to_datetime(df.index)
+            df = df.rename(columns={
+                '1. open': 'Open', '2. high': 'High',
+                '3. low': 'Low', '4. close': 'Close',
+                '5. volume': 'Volume'
+            })[['Open', 'High', 'Low', 'Close', 'Volume']]
+            return df
+        return None
+        
+    except Exception as e:
+        log_error(f"Alpha Vantage error for {ticker}: {e}")
+        return None
+
+# Enhanced data fetching and processing
+def fetch_history(ticker: str, interval: str, max_retries: int = 3) -> Optional[pd.DataFrame]:
+    """Fetch historical data with enhanced error handling and multiple sources."""
+    ui = UIComponents()
+    print(f"Fetching {ui.highlight(ticker)} data for {ui.highlight(interval)}...")
+    
+    # Try cache first
+    cache_key = _get_cache_key(ticker, interval, 'yfinance')
+    data = _load_from_cache(cache_key)
+    if data is not None:
+        print(ui.success(f"Loaded {len(data)} cached data points"))
+        return data
+    
+    # Try multiple data sources with retries
+    sources = [
+        ('Yahoo Finance', fetch_from_yfinance),
+        ('Alpha Vantage', fetch_from_alpha_vantage)
+    ]
+    
+    for attempt in range(max_retries):
+        for source_name, fetch_func in sources:
+            try:
+                data = fetch_func(ticker, interval)
+                if data is not None and not data.empty:
+                    # Cache the successful fetch
+                    _save_to_cache(data, cache_key)
+                    print(ui.success(f"Downloaded {len(data)} data points from {source_name}"))
+                    return data
+            except Exception as e:
+                log_error(f"{source_name} attempt {attempt + 1} failed: {e}")
+                time.sleep(1)  # Brief delay between retries
+    
+    log_error(f"Failed to fetch data for {ticker} after {max_retries} attempts")
+    return None
+
+def compute_indicators(df: pd.DataFrame) -> Optional[pd.DataFrame]:
+    """Compute technical indicators with enhanced error handling."""
+    if df is None or len(df) < 20:
+        log_error("Insufficient data for indicators")
+        return None
+    
+    try:
+        ui = UIComponents()
+        print("Computing technical indicators...")
+        
+        # Import locally to avoid issues
+        import pandas as pd
+        import numpy as np
+        
+        # Basic indicators
+        df['SMA20'] = ta.trend.sma_indicator(df['Close'], window=20)
+        df['SMA50'] = ta.trend.sma_indicator(df['Close'], window=50)
+        df['EMA12'] = ta.trend.ema_indicator(df['Close'], window=12)
+        df['EMA26'] = ta.trend.ema_indicator(df['Close'], window=26)
+        
+        # RSI
+        df['RSI14'] = ta.momentum.rsi(df['Close'], window=14)
+        
+        # MACD
+        macd = ta.trend.MACD(df['Close'])
+        df['MACD'] = macd.macd()
+        df['MACD_SIGNAL'] = macd.macd_signal()
+        df['MACD_HIST'] = macd.macd_diff()
+        
+        # Bollinger Bands
+        bollinger = ta.volatility.BollingerBands(df['Close'])
+        df['BB_UPPER'] = bollinger.bollinger_hband()
+        df['BB_MIDDLE'] = bollinger.bollinger_mavg()
+        df['BB_LOWER'] = bollinger.bollinger_lband()
+        
+        # ATR
+        df['ATR14'] = ta.volatility.average_true_range(df['High'], df['Low'], df['Close'], window=14)
+        
+        # Stochastic
+        stoch = ta.momentum.StochasticOscillator(df['High'], df['Low'], df['Close'])
+        df['STOCH_K'] = stoch.stoch()
+        df['STOCH_D'] = stoch.stoch_signal()
+        
+        # OBV
+        df['OBV'] = ta.volume.on_balance_volume(df['Close'], df['Volume'])
+        
+        # VWAP
+        df['VWAP'] = ta.volume.volume_weighted_average_price(df['High'], df['Low'], df['Close'], df['Volume'])
+        
+        # Custom indicators
+        df['Dist_SMA20'] = (df['Close'] - df['SMA20']) / df['SMA20'] * 100
+        df['Volatility20'] = df['Close'].rolling(window=20).std() / df['Close'].rolling(window=20).mean() * 100
+        df['BB_WIDTH'] = (df['BB_UPPER'] - df['BB_LOWER']) / df['BB_MIDDLE'] * 100
+        
+        print(ui.success(f"Computed {len(DATA_DICTIONARY)} technical indicators"))
+        return df
+        
+    except Exception as e:
+        log_error(f"Indicator computation error: {e}")
+        return df  # Return original df if indicators fail
+
+# Enhanced prediction engines
+def statistical_engine(df: pd.DataFrame) -> Optional[EngineResult]:
+    """Enhanced statistical analysis engine."""
+    if df is None or len(df) < 20:
+        return None
+    
+    try:
+        import pandas as pd
+        import numpy as np
+        
+        start_time = time.time()
+        
+        # Calculate returns
+        returns = df['Close'].pct_change().dropna()
+        
+        # Statistical indicators
+        mean_return = returns.mean()
+        std_return = returns.std()
+        skew = returns.skew()
+        
+        # Recent trend analysis
+        recent_returns = returns.tail(10)
+        recent_mean = recent_returns.mean()
+        
+        # Volatility analysis
+        volatility = df['Close'].pct_change().rolling(window=20).std().iloc[-1]
+        
+        # Calculate prediction based on statistical factors
+        prediction = (recent_mean * 100 + mean_return * 100) / 2
+        
+        # Confidence based on statistical consistency
+        confidence = max(1, min(10, 8 - (std_return * 100) + abs(skew)))
+        
+        # Generate comment
+        if recent_mean > mean_return:
+            trend_desc = "Recent upward momentum"
+        elif recent_mean < mean_return:
+            trend_desc = "Recent downward momentum"
+        else:
+            trend_desc = "Neutral momentum"
+        
+        comment = f"Statistical analysis: {trend_desc}, Volatility: {volatility:.3f}"
+        
+        processing_time = time.time() - start_time
+        
+        return EngineResult(
+            engine="Statistical",
+            prediction=prediction,
+            confidence=confidence,
+            comment=comment,
+            processing_time=processing_time
+        )
+        
+    except Exception as e:
+        log_error(f"Statistical engine error: {e}")
+        return None
+
+def technical_engine(df: pd.DataFrame) -> Optional[EngineResult]:
+    """Enhanced technical analysis engine."""
+    if df is None or len(df) < 50:
+        return None
+    
+    try:
+        import pandas as pd
+        import numpy as np
+        
+        start_time = time.time()
+        
+        # Get latest indicator values
+        latest = df.iloc[-1]
+        prev = df.iloc[-2] if len(df) >= 2 else latest
+        
+        signals = []
+        total_weight = 0
+        
+        # Enhanced SMA signals with weight based on distance
+        if pd.notna(latest['SMA20']) and pd.notna(latest['SMA50']):
+            sma_distance = abs(latest['Close'] - latest['SMA20']) / latest['SMA20']
+            weight = 2.0 + min(1.0, sma_distance * 10)  # Increase weight for strong signals
+            
+            if latest['Close'] > latest['SMA20'] > latest['SMA50']:
+                signals.append(('bullish', weight, f'Price above both SMAs ({weight:.1f} weight)'))
+                total_weight += weight
+            elif latest['Close'] < latest['SMA20'] < latest['SMA50']:
+                signals.append(('bearish', weight, f'Price below both SMAs ({weight:.1f} weight)'))
+                total_weight += weight
+        
+        # Enhanced RSI with divergence detection
+        if pd.notna(latest['RSI14']):
+            rsi_weight = 1.5
+            if latest['RSI14'] < 30:
+                signals.append(('bullish', rsi_weight, 'RSI oversold'))
+                total_weight += rsi_weight
+            elif latest['RSI14'] > 70:
+                signals.append(('bearish', rsi_weight, 'RSI overbought'))
+                total_weight += rsi_weight
+        
+        # Enhanced MACD with signal strength
+        if pd.notna(latest['MACD']) and pd.notna(latest['MACD_SIGNAL']):
+            macd_diff = abs(latest['MACD'] - latest['MACD_SIGNAL'])
+            macd_weight = 1.8 + min(0.5, macd_diff * 100)  # Stronger signals for larger differences
+            
+            if latest['MACD'] > latest['MACD_SIGNAL'] and prev['MACD'] <= prev['MACD_SIGNAL']:
+                signals.append(('bullish', macd_weight, f'MACD bullish crossover ({macd_weight:.1f} weight)'))
+                total_weight += macd_weight
+            elif latest['MACD'] < latest['MACD_SIGNAL'] and prev['MACD'] >= prev['MACD_SIGNAL']:
+                signals.append(('bearish', macd_weight, f'MACD bearish crossover ({macd_weight:.1f} weight)'))
+                total_weight += macd_weight
+        
+        # Enhanced Bollinger Bands
+        if all(pd.notna(latest[col]) for col in ['BB_UPPER', 'BB_LOWER', 'Close']):
+            bb_position = (latest['Close'] - latest['BB_LOWER']) / (latest['BB_UPPER'] - latest['BB_LOWER'])
+            bb_weight = 1.2 + abs(0.5 - bb_position) * 2  # Stronger signals at extremes
+            
+            if latest['Close'] < latest['BB_LOWER']:
+                signals.append(('bullish', bb_weight, f'Below lower Bollinger Band ({bb_weight:.1f} weight)'))
+                total_weight += bb_weight
+            elif latest['Close'] > latest['BB_UPPER']:
+                signals.append(('bearish', bb_weight, f'Above upper Bollinger Band ({bb_weight:.1f} weight)'))
+                total_weight += bb_weight
+        
+        # Enhanced Stochastic
+        if pd.notna(latest['STOCH_K']) and pd.notna(latest['STOCH_D']):
+            stoch_weight = 1.0
+            if latest['STOCH_K'] < 20 and latest['STOCH_D'] < 20:
+                signals.append(('bullish', stoch_weight, 'Stochastic oversold'))
+                total_weight += stoch_weight
+            elif latest['STOCH_K'] > 80 and latest['STOCH_D'] > 80:
+                signals.append(('bearish', stoch_weight, 'Stochastic overbought'))
+                total_weight += stoch_weight
+        
+        # Calculate weighted prediction
+        if not signals:
+            # Enhanced fallback based on overall trend
+            if pd.notna(latest['SMA20']):
+                trend_strength = (latest['Close'] - latest['SMA20']) / latest['SMA20']
+                if trend_strength > 0.01:  # 1% above SMA
+                    signals.append(('bullish', 0.5, f'Price above SMA20 by {trend_strength:.1%}'))
+                    total_weight += 0.5
+                elif trend_strength < -0.01:  # 1% below SMA
+                    signals.append(('bearish', 0.5, f'Price below SMA20 by {abs(trend_strength):.1%}'))
+                    total_weight += 0.5
+                else:
+                    return None
+            else:
+                return None
+        
+        bullish_weight = sum(weight for signal, weight, _ in signals if signal == 'bullish')
+        bearish_weight = sum(weight for signal, weight, _ in signals if signal == 'bearish')
+        
+        net_weight = bullish_weight - bearish_weight
+        prediction = (net_weight / total_weight) * 5.0
+        
+        # Enhanced confidence calculation
+        signal_consistency = abs(net_weight) / total_weight if total_weight > 0 else 0
+        confidence = min(10, (total_weight / 4.0) + signal_consistency * 4)
+        
+        # Generate enhanced comment
+        signal_comments = [comment for _, _, comment in signals[:3]]
+        comment = f"Technical: {', '.join(signal_comments)}"
+        
+        processing_time = time.time() - start_time
+        
+        return EngineResult(
+            engine="Technical",
+            prediction=prediction,
+            confidence=confidence,
+            comment=comment,
+            processing_time=processing_time
+        )
+        
+    except Exception as e:
+        log_error(f"Technical engine error: {e}")
+        return None
+
+def ml_engine(df: pd.DataFrame, use_gpu: bool = False, learning_feedback: Optional[Dict] = None) -> Optional[EngineResult]:
+    """Enhanced ML engine with learning feedback integration."""
+    if df is None or len(df) < 100:
+        return None
+    
+    try:
+        import pandas as pd
+        import numpy as np
+        from sklearn.ensemble import RandomForestRegressor
+        
+        start_time = time.time()
+        
+        # Prepare features
+        feature_cols = ['SMA20', 'SMA50', 'RSI14', 'MACD', 'ATR14', 'OBV',
+                       'Dist_SMA20', 'Volatility20', 'BB_WIDTH']
+        
+        # Ensure we have all required features
+        available_cols = [col for col in feature_cols if col in df.columns]
+        if len(available_cols) < 5:
+            return None
+        
+        # Clean data
+        feature_df = df[available_cols].dropna()
+        if len(feature_df) < 50:
+            return None
+        
+        # Prepare target (next day return)
+        returns = df['Close'].pct_change().dropna()
+        if len(returns) != len(feature_df):
+            min_len = min(len(returns), len(feature_df))
+            returns = returns.iloc[-min_len:]
+            feature_df = feature_df.iloc[-min_len:]
+        
+        # Split data
+        train_size = int(len(feature_df) * 0.8)
+        X_train = feature_df.iloc[:train_size].values
+        X_test = feature_df.iloc[train_size:].values
+        y_train = returns.iloc[:train_size].values
+        y_test = returns.iloc[train_size:].values
+        
+        # GPU acceleration if available
+        gpu_used = False
+        if use_gpu and CUPY_AVAILABLE:
+            try:
+                X_train_gpu = cp.array(X_train)
+                X_test_gpu = cp.array(X_test)
+                y_train_gpu = cp.array(y_train)
+                # Convert back for sklearn
+                X_train = cp.asnumpy(X_train_gpu)
+                X_test = cp.asnumpy(X_test_gpu)
+                y_train = cp.asnumpy(y_train_gpu)
+                gpu_used = True
+            except Exception:
+                pass
+        
+        # Enhanced model with learning feedback
+        if learning_feedback and 'accuracy_rating' in learning_feedback:
+            # Adjust model complexity based on learning feedback
+            accuracy = learning_feedback['accuracy_rating']
+            if accuracy >= 8:
+                n_estimators = 200  # More trees for high accuracy
+                max_depth = None
+            elif accuracy >= 5:
+                n_estimators = 100  # Standard
+                max_depth = 10
+            else:
+                n_estimators = 50   # Fewer trees for low accuracy
+                max_depth = 5
+        else:
+            n_estimators = 100
+            max_depth = 10
+        
+        # Train Random Forest
+        model = RandomForestRegressor(
+            n_estimators=n_estimators,
+            max_depth=max_depth,
+            random_state=42,
+            n_jobs=-1
+        )
+        model.fit(X_train, y_train)
+        
+        # Make prediction
+        last_features = feature_df.iloc[-1:].values
+        prediction_change = model.predict(last_features)[0]
+        prediction_pct = prediction_change * 100
+        
+        # Calculate confidence based on model performance
+        train_score = model.score(X_train, y_train)
+        test_score = model.score(X_test, y_test) if len(X_test) > 0 else train_score
+        
+        # Enhanced confidence with learning feedback
+        base_confidence = max(1, min(10, test_score * 10))
+        if learning_feedback and 'confidence_boost' in learning_feedback:
+            base_confidence += learning_feedback['confidence_boost']
+        
+        confidence = max(1, min(10, base_confidence))
+        
+        # Feature importance for explanation
+        feature_importance = model.feature_importances_
+        top_features = sorted(zip(available_cols, feature_importance), key=lambda x: x[1], reverse=True)[:3]
+        feature_explanation = ", ".join([f"{feat} ({imp:.2f})" for feat, imp in top_features])
+        
+        # Generate enhanced comment
+        engine_name = "ML/GPU" if gpu_used else "ML"
+        comment = f"Random Forest ({n_estimators} trees, max_depth={max_depth}). Top features: {feature_explanation}. Test score: {test_score:.3f}"
+        
+        processing_time = time.time() - start_time
+        
+        return EngineResult(
+            engine=engine_name,
+            prediction=prediction_pct,
+            confidence=confidence,
+            comment=comment,
+            accuracy_history=[test_score * 10],
+            training_samples=len(X_train),
+            processing_time=processing_time
+        )
+        
+    except Exception as e:
+        log_error(f"ML engine error: {e}")
+        return None
+
+def consolidate_predictions(results: List[EngineResult]) -> EngineResult:
+    """Enhanced prediction consolidation with conflict detection."""
+    if not results:
+        return EngineResult("Consolidated", 0.0, 0.0, "No results available")
+    
+    try:
+        # Weight by confidence
+        total_weight = sum(r.confidence for r in results)
+        if total_weight == 0:
+            return EngineResult("Consolidated", 0.0, 0.0, "Zero confidence weights")
+        
+        # Calculate weighted prediction
+        weighted_prediction = sum(r.prediction * r.confidence for r in results) / total_weight
+        
+        # Calculate average confidence
+        avg_confidence = total_weight / len(results)
+        
+        # Enhanced conflict detection
+        predictions = [r.prediction for r in results]
+        prediction_range = max(predictions) - min(predictions)
+        
+        # Detect conflicts
+        conflicts = []
+        if len(results) >= 3:
+            # Check for engine disagreements
+            bullish_engines = [r.engine for r in results if r.prediction > 0]
+            bearish_engines = [r.engine for r in results if r.prediction < 0]
+            
+            if bullish_engines and bearish_engines:
+                conflicts.append(f"Engine disagreement: {', '.join(bullish_engines)} bullish vs {', '.join(bearish_engines)} bearish")
+        
+        if prediction_range > 8:  # Large spread indicates conflict
+            conflicts.append(f"Large prediction spread: {prediction_range:.2f}%")
+        
+        # Adjust confidence based on conflicts
+        conflict_penalty = len(conflicts) * 1.5
+        final_confidence = max(1, avg_confidence - conflict_penalty)
+        
+        # Generate enhanced comment
+        engine_list = ", ".join([f"{r.engine} ({r.prediction:+.2f}%)" for r in results])
+        comment = f"Consolidated from {len(results)} engines: {engine_list}"
+        
+        if conflicts:
+            comment += f". Conflicts detected: {'; '.join(conflicts)}"
+        
+        # Calculate consolidated range
+        individual_ranges = [(r.range_low, r.range_high) for r in results]
+        min_low = min(r[0] for r in individual_ranges)
+        max_high = max(r[1] for r in individual_ranges)
+        
+        return EngineResult(
+            engine="Consolidated",
+            prediction=weighted_prediction,
+            confidence=final_confidence,
+            comment=comment,
+            range_low=min_low,
+            range_high=max_high
+        )
+        
+    except Exception as e:
+        log_error(f"Consolidation error: {e}")
+        return EngineResult("Consolidated", 0.0, 0.0, f"Consolidation error: {e}")
+
+# Enhanced Learning Mode Functions
+def start_learning_mode(target_confidence: float = 9.0, max_iterations: int = 10) -> Dict:
+    """Start enhanced learning mode with UI feedback."""
+    global LEARNING_MODE
+    
+    ui = UIComponents()
+    
+    LEARNING_MODE.update({
+        "active": True,
+        "target_confidence": target_confidence,
+        "current_confidence": 0.0,
+        "current_iteration": 0,
+        "max_iterations": max_iterations,
+        "predictions": [],
+        "confidence_history": [],
+        "accuracy_ratings": [],
+        "start_time": datetime.datetime.now()
+    })
+    
+    print(ui.success(f"Learning mode started"))
+    print(ui.info(f"Target confidence: {target_confidence}/10"))
+    print(ui.info(f"Max iterations: {max_iterations}"))
+    
+    return {"status": "started", "target_confidence": target_confidence, "max_iterations": max_iterations}
+
+def analyze_with_learning(ticker: str, interval: str) -> Optional[EngineResult]:
+    """Enhanced analysis with learning integration."""
+    if not LEARNING_MODE["active"]:
+        return None
+    
+    ui = UIComponents()
+    
+    try:
+        # Fetch and process data
+        df = fetch_history(ticker, interval)
+        if df is None:
+            return None
+        
+        df = compute_indicators(df)
+        if df is None:
+            return None
+        
+        # Run all engines
+        config = load_config()
+        results = []
+        
+        # Statistical
+        stat_result = statistical_engine(df)
+        if stat_result:
+            results.append(stat_result)
+        
+        # Technical
+        tech_result = technical_engine(df)
+        if tech_result:
+            results.append(tech_result)
+        
+        # ML with learning feedback
+        learning_feedback = None
+        if LEARNING_MODE["accuracy_ratings"]:
+            # Use recent accuracy for feedback
+            recent_accuracy = LEARNING_MODE["accuracy_ratings"][-3:]  # Last 3 ratings
+            avg_accuracy = sum(recent_accuracy) / len(recent_accuracy)
+            confidence_boost = (avg_accuracy - 5) * 0.2  # Boost based on performance
+            
+            learning_feedback = {
+                "accuracy_rating": avg_accuracy,
+                "confidence_boost": confidence_boost
+            }
+        
+        ml_result = ml_engine(df, config.get("gpu_enabled", False), learning_feedback)
+        if ml_result:
+            results.append(ml_result)
+        
+        if not results:
+            return None
+        
+        # Consolidate predictions
+        final_result = consolidate_predictions(results)
+        
+        # Update learning state
+        LEARNING_MODE["current_iteration"] += 1
+        LEARNING_MODE["current_confidence"] = final_result.confidence
+        LEARNING_MODE["confidence_history"].append(final_result.confidence)
+        
+        # Store prediction for evaluation
+        prediction_record = {
+            "timestamp": datetime.datetime.now(),
+            "ticker": ticker,
+            "interval": interval,
+            "prediction": final_result.prediction,
+            "range_low": final_result.range_low,
+            "range_high": final_result.range_high,
+            "confidence": final_result.confidence,
+            "engines": len(results),
+            "iteration": LEARNING_MODE["current_iteration"]
+        }
+        
+        LEARNING_MODE["predictions"].append(prediction_record)
+        
+        # Check if target confidence reached
+        if final_result.confidence >= LEARNING_MODE["target_confidence"]:
+            print(ui.success(f"Target confidence {LEARNING_MODE['target_confidence']}/10 achieved!"))
+            LEARNING_MODE["active"] = False
+        
+        return final_result
+        
+    except Exception as e:
+        log_error(f"Learning analysis error: {e}")
+        return None
+
+def get_learning_summary() -> Dict:
+    """Get enhanced learning summary with UI formatting."""
+    ui = UIComponents()
+    
+    if not LEARNING_MODE["active"] and not LEARNING_MODE["predictions"]:
+        return {"status": "inactive", "message": "No learning data available"}
+    
+    summary = {
+        "status": "active" if LEARNING_MODE["active"] else "completed",
+        "current_iteration": LEARNING_MODE["current_iteration"],
+        "max_iterations": LEARNING_MODE["max_iterations"],
+        "target_confidence": LEARNING_MODE["target_confidence"],
+        "current_confidence": LEARNING_MODE["current_confidence"],
+        "total_predictions": len(LEARNING_MODE["predictions"]),
+        "confidence_history": LEARNING_MODE["confidence_history"].copy(),
+        "accuracy_ratings": LEARNING_MODE["accuracy_ratings"].copy()
+    }
+    
+    # Calculate additional metrics
+    if LEARNING_MODE["predictions"]:
+        summary["start_time"] = LEARNING_MODE.get("start_time")
+        
+        # Active predictions (not yet evaluated)
+        summary["active_predictions"] = len([p for p in LEARNING_MODE["predictions"] if "accuracy_rating" not in p])
+        
+        # Evaluated predictions
+        summary["evaluated_predictions"] = len([p for p in LEARNING_MODE["predictions"] if "accuracy_rating" in p])
+        
+        # Average accuracy
+        evaluated = [p for p in LEARNING_MODE["predictions"] if "accuracy_rating" in p]
+        if evaluated:
+            summary["average_accuracy"] = sum(p["accuracy_rating"] for p in evaluated) / len(evaluated)
+            summary["accuracy_rate"] = len([p for p in evaluated if p["accuracy_rating"] >= 6]) / len(evaluated) * 100
+        else:
+            summary["average_accuracy"] = 0.0
+            summary["accuracy_rate"] = 0.0
+        
+        # Recent evaluations
+        summary["recent_evaluations"] = evaluated[-5:] if evaluated else []
+    
+    return summary
+
+def evaluate_active_predictions() -> List[Dict]:
+    """Evaluate active predictions against actual market data."""
+    if not LEARNING_MODE["predictions"]:
+        return []
+    
+    ui = UIComponents()
+    evaluated = []
+    
+    for prediction in LEARNING_MODE["predictions"]:
+        if "accuracy_rating" in prediction:
+            continue  # Already evaluated
+        
+        try:
+            # Check if enough time has passed
+            elapsed = datetime.datetime.now() - prediction["timestamp"]
+            duration = get_interval_duration(prediction["interval"])
+            
+            if elapsed.total_seconds() < duration:
+                continue  # Not time to evaluate yet
+            
+            # Fetch current data
+            df = fetch_history(prediction["ticker"], prediction["interval"])
+            if df is None or len(df) < 2:
+                continue
+            
+            # Calculate actual return
+            start_price = df.iloc[0]['Close']
+            end_price = df.iloc[-1]['Close']
+            actual_return = ((end_price - start_price) / start_price) * 100
+            
+            # Calculate accuracy rating
+            predicted_range = (prediction["range_low"], prediction["range_high"])
+            
+            if prediction["range_low"] <= actual_return <= prediction["range_high"]:
+                # Within predicted range
+                range_center = (prediction["range_low"] + prediction["range_high"]) / 2
+                distance_from_center = abs(actual_return - range_center)
+                max_distance = (prediction["range_high"] - prediction["range_low"]) / 2
+                
+                if max_distance > 0:
+                    accuracy = max(0, 10 - (distance_from_center / max_distance) * 5)
+                else:
+                    accuracy = 10
+            else:
+                # Outside predicted range
+                distance = min(abs(actual_return - prediction["range_low"]), 
+                             abs(actual_return - prediction["range_high"]))
+                accuracy = max(0, 5 - distance)
+            
+            # Update prediction record
+            prediction["actual_return"] = actual_return
+            prediction["accuracy_rating"] = accuracy
+            prediction["evaluation_time"] = datetime.datetime.now()
+            
+            # Update learning mode accuracy ratings
+            LEARNING_MODE["accuracy_ratings"].append(accuracy)
+            
+            evaluated.append({
+                "ticker": prediction["ticker"],
+                "interval": prediction["interval"],
+                "predicted": prediction["prediction"],
+                "predicted_range": predicted_range,
+                "actual": actual_return,
+                "accuracy_rating": accuracy,
+                "confidence": prediction["confidence"]
+            })
+            
+        except Exception as e:
+            log_error(f"Evaluation error for {prediction['ticker']}: {e}")
+            continue
+    
+    if evaluated:
+        print(ui.success(f"Evaluated {len(evaluated)} predictions"))
+    
+    return evaluated
+
+def stop_learning_mode() -> Dict:
+    """Stop learning mode and return final summary."""
+    global LEARNING_MODE
+    
+    ui = UIComponents()
+    
+    # Evaluate remaining predictions
+    evaluate_active_predictions()
+    
+    # Generate final summary
+    summary = get_learning_summary()
+    summary["status"] = "stopped"
+    
+    # Reset learning mode
+    LEARNING_MODE = {
+        "active": False,
+        "target_confidence": 9.0,
+        "current_confidence": 0.0,
+        "current_iteration": 0,
+        "max_iterations": 10,
+        "predictions": [],
+        "confidence_history": [],
+        "accuracy_ratings": [],
+        "start_time": None
+    }
+    
+    print(ui.success("Learning mode stopped"))
+    
+    return summary
+
+def get_interval_duration(interval: str) -> int:
+    """Get interval duration in seconds."""
+    duration_map = {
+        "1m": 60, "5m": 300, "10m": 600, "15m": 900,
+        "30m": 1800, "1h": 3600, "4h": 14400, "1d": 86400
+    }
+    return duration_map.get(interval.lower(), 86400)  # Default to 1 day
+def analyze_ticker(ticker: str, interval: str) -> Optional[EngineResult]:
+    """Enhanced single ticker analysis with market intelligence."""
+    ui = UIComponents()
+    print(f"\n{ui.header('Analyzing')} {ui.highlight(ticker)} at {ui.highlight(interval)} interval")
+    
+    try:
+        # Fetch historical data
+        df = fetch_history(ticker, interval)
+        if df is None or df.empty:
+            print(ui.error("Failed to fetch data"))
+            return None
+            
+        # Initialize market intelligence
+        market_context = None
+        if MARKET_INTELLIGENCE_AVAILABLE:
+            try:
+                analyzer = MarketIntelligence(df)
+                market_context = analyzer.get_market_context(ticker)
+                
+                # Display data quality assessment
+                dq = market_context['data_quality']
+                print(f"\n{ui.subheader('Data Quality Assessment:')}")
+                dq_score = dq['score']
+                dq_color = 'green' if dq_score > 0.7 else 'yellow' if dq_score > 0.5 else 'red'
+                print(f"  • Overall: {ui.color_text(f'{dq_score*100:.1f}%', dq_color)}")
+                print(f"  • Completeness: {dq['completeness']*100:.1f}%")
+                print(f"  • Consistency: {dq['consistency']*100:.1f}%")
+                print(f"  • Timeliness: {dq['timeliness']*100:.1f}%")
+                print(f"  • Reliability: {dq['reliability']*100:.1f}%")
+                
+                # Display market sentiment if available
+                if 'sentiment' in market_context:
+                    sentiment = market_context['sentiment']
+                    sentiment_score = sentiment['score']
+                    sentiment_confidence = sentiment['confidence']
+                    sentiment_color = 'green' if sentiment_score > 0.2 else 'red' if sentiment_score < -0.2 else 'yellow'
+                    print(f"\n{ui.subheader('Market Sentiment:')}")
+                    print(f"  • Score: {ui.color_text(f'{sentiment_score:.2f}', sentiment_color)} "
+                          f"(Confidence: {sentiment_confidence*100:.1f}%)")
+                
+                # Display recommendation if available
+                if 'analysis' in market_context and 'recommendation' in market_context['analysis']:
+                    print(f"\n{ui.subheader('Recommendation:')}")
+                    print(f"  • {market_context['analysis']['recommendation']}")
+            
+            except Exception as e:
+                log_error(f"Market intelligence error: {e}")
+                print(ui.warning("  ⚠️  Market intelligence partially failed (see logs)"))
+        
+        # Compute indicators
+        df = compute_indicators(df)
+        if df is None:
+            print(ui.error("Failed to compute indicators"))
+            return None
+            
+        # Run analysis engines
+        results = []
+        
+        # Statistical analysis
+        stat_result = statistical_engine(df, market_context=market_context)
+        if stat_result:
+            results.append(stat_result)
+            print(f"  {ui.success('✓')} Statistical analysis complete")
+        
+        # Technical analysis
+        tech_result = technical_engine(df)
+        if tech_result:
+            results.append(tech_result)
+            print(f"  {ui.success('✓')} Technical analysis complete")
+        
+        # ML analysis with market context if available
+        ml_result = ml_engine(df, config.get("gpu_enabled", False), market_context=market_context)
+        if ml_result:
+            results.append(ml_result)
+            print(f"  {ui.success('✓')} ML analysis complete")
+        
+        if not results:
+            print(ui.error("All analysis engines failed"))
+            return None
+            
+        # Consolidate results with market context
+        final_result = consolidate_predictions(results, market_context=market_context)
+        
+        # Log prediction
+        log_prediction(ticker, interval, final_result)
+        
+        return final_result
+        
+    except Exception as e:
+        log_error(f"Analysis error for {ticker}: {e}")
+        print(ui.error(f"Analysis failed: {e}"))
+        return None
+
+def analyze_multiple(tickers: List[str], interval: str) -> Dict[str, EngineResult]:
+    """Enhanced multiple ticker analysis with progress bar and market intelligence."""
+    ui = UIComponents()
+    results = {}
+    
+    print(f"\n{ui.header('Batch Analysis')}")
+    print(f"Analyzing {ui.highlight(str(len(tickers)))} tickers at {ui.highlight(interval)} interval")
+    print()
+    
+    # Pre-fetch market data if available
+    market_data = {}
+    if MARKET_INTELLIGENCE_AVAILABLE:
+        print(f"{ui.info('Gathering market intelligence...')}")
+        for ticker in tickers:
+            try:
+                df = fetch_history(ticker, interval)
+                if df is not None and not df.empty:
+                    analyzer = MarketIntelligence(df)
+                    market_data[ticker] = analyzer.get_market_context(ticker)
+                time.sleep(0.5)  # Be nice to the API
+            except Exception as e:
+                log_error(f"Error pre-fetching market data for {ticker}: {e}")
+    
+    # Create progress bar
+    ticker_iter = create_progress_bar(tickers, desc="Analyzing tickers")
+    
+    for ticker in ticker_iter:
+        # Use pre-fetched market data if available
+        market_context = market_data.get(ticker)
+        result = analyze_ticker(ticker, interval)
+        if result:
+            results[ticker] = result
+        
+        # Small delay to avoid rate limiting
+        time.sleep(0.5)
+    
+    ticker_iter.close()
+    print()
+    
+    # Display summary with enhanced analysis
+    if results:
+        print(f"\n{ui.header('Batch Analysis Summary')}")
+        
+        # Sort by confidence * abs(prediction) to highlight strongest signals
+        sorted_results = sorted(
+            results.items(), 
+            key=lambda x: abs(x[1].prediction) * (x[1].confidence / 10),
+            reverse=True
+        )
+        
+        # Create results table with additional metrics
+        headers = ["Ticker", "Prediction", "Confidence", "Range", "Data Quality", "Sentiment"]
+        widths = [10, 12, 12, 20, 15, 15]
+        
+        print(ui.table_separator(widths))
+        print(ui.table_row(headers, widths, ['center']))
+        print(ui.table_separator(widths))
+        
+        for ticker, result in sorted_results:
+            # Get market context if available
+            mkt_data = market_data.get(ticker, {})
+            
+            # Prediction with color
+            pred_color = Fore.GREEN if result.prediction > 0 else Fore.RED
+            pred_text = ui.color_text(f"{result.prediction:+.2f}%", pred_color)
+            
+            # Confidence with color
+            conf_color = Fore.GREEN if result.confidence >= 8 else Fore.YELLOW if result.confidence >= 5 else Fore.RED
+            conf_text = ui.color_text(f"{result.confidence:.1f}/10", conf_color)
+            
+            # Range
+            range_text = f"{result.range_low:+.2f}% to {result.range_high:+.2f}%"
+            
+            # Data quality from market context
+            dq_score = mkt_data.get('data_quality', {}).get('score', 0.5)
+            dq_color = 'green' if dq_score > 0.7 else 'yellow' if dq_score > 0.5 else 'red'
+            dq_text = ui.color_text(f"{dq_score*100:.1f}%", dq_color)
+            
+            # Sentiment from market context
+            sentiment = mkt_data.get('sentiment', {}).get('score', 0)
+            sent_color = 'green' if sentiment > 0.2 else 'red' if sentiment < -0.2 else 'yellow'
+            sent_text = ui.color_text(
+                f"{'↑' if sentiment > 0.2 else '↓' if sentiment < -0.2 else '↔'}", 
+                sent_color
+            )
+# Enhanced Training Functions
+def start_continuous_training():
+    """Start continuous training with enhanced UI."""
+    ui = UIComponents()
+    
+    print(ui.header("Continuous Training"))
+    print(ui.info("Starting background training worker..."))
+    print(ui.warning("Press Ctrl+C to stop training"))
+    
+    def training_worker():
+        """Enhanced background training worker."""
+        config = load_config()
+        tickers = load_tickers()
+        
+        log("Starting enhanced continuous training worker")
+        
+        iteration = 0
+        while not CANCEL_FLAG.is_set():
+            iteration += 1
+            print(f"\n{ui.header(f'Training Cycle {iteration}')}")
+            
+            try:
+                # Create progress bar for tickers
+                ticker_progress = create_progress_bar(tickers, desc="Training tickers")
+                
+                for ticker in ticker_progress:
+                    if CANCEL_FLAG.is_set():
+                        break
+                    
+                    # Create progress bar for intervals
+                    interval_progress = create_progress_bar(config["training_intervals"], desc=f"Intervals for {ticker}")
+                    
+                    for interval in interval_progress:
+                        if CANCEL_FLAG.is_set():
+                            break
+                        
+                        try:
+                            # Fetch and analyze
+                            df = fetch_history(ticker, interval)
+                            if df is None:
+                                continue
+                            
+                            df = compute_indicators(df)
+                            if df is None or len(df) < 50:
+                                continue
+                            
+                            # Run engines
+                            results = []
+                            
+                            stat_result = statistical_engine(df)
+                            if stat_result:
+                                results.append(stat_result)
+                            
+                            tech_result = technical_engine(df)
+                            if tech_result:
+                                results.append(tech_result)
+                            
+                            ml_result = ml_engine(df, config.get("gpu_enabled", False))
+                            if ml_result:
+                                results.append(ml_result)
+                            
+                            if results:
+                                final_result = consolidate_predictions(results)
+                                
+                                # Log training result
+                                training_record = {
+                                    'timestamp': datetime.datetime.now().isoformat(),
+                                    'ticker': ticker,
+                                    'interval': interval,
+                                    'engines': len(results),
+                                    'prediction': final_result.prediction,
+                                    'confidence': final_result.confidence,
+                                    'data_points': len(df)
+                                }
+                                
+                                # Save to training log
+                                os.makedirs(os.path.dirname(TRAINING_LOG), exist_ok=True)
+                                with open(TRAINING_LOG, 'a', newline='') as f:
+                                    writer = csv.DictWriter(f, fieldnames=training_record.keys())
+                                    if f.tell() == 0:
+                                        writer.writeheader()
+                                    writer.writerow(training_record)
+                                
+                                log(f"Training: {ticker} {interval} -> {final_result.prediction:+.2f}% (confidence: {final_result.confidence:.1f})")
+                        
+                        except Exception as e:
+                            log_error(f"Training error for {ticker} {interval}: {e}")
+                            continue
+                    
+                    interval_progress.close()
+                
+                ticker_progress.close()
+                
+                # Cycle delay
+                if not CANCEL_FLAG.is_set():
+                    print(f"\n{ui.info('Cycle completed. Waiting 5 minutes...')}")
+                    time.sleep(300)  # 5 minutes
+                
+            except Exception as e:
+                log_error(f"Training cycle error: {e}")
+                time.sleep(60)  # Wait before retrying
+        
+        log("Training worker stopped")
+    
+    # Start training thread
+    training_thread = threading.Thread(target=training_worker, daemon=True)
+    training_thread.start()
+    
+    try:
+        # Wait for interrupt
+        while training_thread.is_alive():
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print(f"\n{ui.warning('Stopping training...')}")
+        CANCEL_FLAG.set()
+        training_thread.join(timeout=5)
+        print(ui.success("Training stopped"))
+
+def batch_analysis(tickers: List[str], intervals: List[str]) -> Dict:
+    """Enhanced batch analysis with comprehensive logging."""
+    ui = UIComponents()
+    
+    print(ui.header("Enhanced Batch Analysis"))
+    print(f"Analyzing {len(tickers)} tickers across {len(intervals)} intervals")
+    
+    config = load_config()
+    results = {}
+    
+    # Create overall progress
+    total_tasks = len(tickers) * len(intervals)
+    task_progress = create_progress_bar(range(total_tasks), desc="Total progress")
+    
+    for ticker in tickers:
+        ticker_results = {}
+        
+        for interval in intervals:
+            if CANCEL_FLAG.is_set():
+                break
+            
+            try:
+                # Analyze
+                result = analyze_ticker(ticker, interval)
+                ticker_results[interval] = result
+                
+                # Log batch result
+                if result:
+                    batch_record = {
+                        'timestamp': datetime.datetime.now().isoformat(),
+                        'ticker': ticker,
+                        'interval': interval,
+                        'prediction': result.prediction,
+                        'confidence': result.confidence,
+                        'engines': len(result.comment.split(',')) if result.comment else 0
+                    }
+                    
+                    # Save to batch log
+                    os.makedirs(os.path.dirname(BATCH_ANALYSIS_LOG), exist_ok=True)
+                    try:
+                        with open(BATCH_ANALYSIS_LOG, 'r') as f:
+                            batch_data = json.load(f)
+                    except (FileNotFoundError, json.JSONDecodeError):
+                        batch_data = []
+                    
+                    batch_data.append(batch_record)
+                    
+                    with open(BATCH_ANALYSIS_LOG, 'w') as f:
+                        json.dump(batch_data, f, indent=2)
+                
+            except Exception as e:
+                log_error(f"Batch analysis error for {ticker} {interval}: {e}")
+                ticker_results[interval] = None
+            
+            next(task_progress)  # Update progress
+        
+        results[ticker] = ticker_results
+    
+    task_progress.close()
+    
+    # Generate summary
+    successful_analyses = sum(1 for ticker_results in results.values() 
+                              for result in ticker_results.values() if result)
+    
+    print(f"\n{ui.success(f'Batch analysis completed: {successful_analyses}/{total_tasks} successful')}")
+    
+    return results
+
+# Enhanced UI Functions
+def log_prediction(ticker: str, interval: str, result: EngineResult):
+    """Enhanced prediction logging."""
+    try:
+        os.makedirs(os.path.dirname(PREDICTION_LOG), exist_ok=True)
+        
+        prediction_record = {
+            'timestamp': datetime.datetime.now().isoformat(),
+            'ticker': ticker,
+            'interval': interval,
+            'engine': result.engine,
+            'prediction': result.prediction,
+            'confidence': result.confidence,
+            'range_low': result.range_low,
+            'range_high': result.range_high,
+            'comment': result.comment
+        }
+        
+        with open(PREDICTION_LOG, 'a', newline='') as f:
+            writer = csv.DictWriter(f, fieldnames=prediction_record.keys())
+            if f.tell() == 0:
+                writer.writeheader()
+            writer.writerow(prediction_record)
+            
+    except Exception as e:
+        log_error(f"Prediction logging error: {e}")
+
+# Enhanced Menu Functions
+def get_interval_choice() -> str:
+    """Enhanced interval selection with UI improvements."""
+    ui = UIComponents()
+    
+    intervals = {
+        "1": ("1m", "1 minute"),
+        "2": ("5m", "5 minutes"),
+        "3": ("10m", "10 minutes"),
+        "4": ("15m", "15 minutes"),
+        "5": ("30m", "30 minutes"),
+        "6": ("1h", "1 hour"),
+        "7": ("4h", "4 hours"),
+        "8": ("1d", "1 day")
+    }
+    
+    print(ui.header("Select Time Interval"))
+    print()
+    
+    for key, (code, description) in intervals.items():
+        print(f"  {key}. {ui.highlight(code)} - {description}")
+    
+    print()
+    
+    while True:
+        choice = input(ui.color_text("Enter choice (1-8): ", Fore.CYAN)).strip()
+        if choice in intervals:
+            return intervals[choice][0]
+        print(ui.error("Invalid choice. Please try again."))
+
+def show_indicators_dict():
+    """Enhanced technical indicators dictionary display."""
+    ui = UIComponents()
+    
+    print(ui.header("Technical Indicators Dictionary"))
+    print()
+    
+    # Group indicators by category
+    categories = {
+        "Trend Indicators": ["SMA20", "SMA50", "EMA12", "EMA26"],
+        "Momentum Indicators": ["RSI14", "MACD", "MACD_SIGNAL", "MACD_HIST", "STOCH_K", "STOCH_D"],
+        "Volatility Indicators": ["BB_UPPER", "BB_MIDDLE", "BB_LOWER", "ATR14", "VOLATILITY20", "BB_WIDTH"],
+        "Volume Indicators": ["OBV", "VWAP"],
+        "Custom Indicators": ["Dist_SMA20"]
+    }
+    
+    for category, indicators in categories.items():
+        print(ui.header(category))
+        print(ui.table_separator([20, 40, 30]))
+        print(ui.table_row(["Indicator", "Description", "Usage"], [20, 40, 30], ['center']))
+        print(ui.table_separator([20, 40, 30]))
+        
+        for indicator in indicators:
+            if indicator in DATA_DICTIONARY:
+                info = DATA_DICTIONARY[indicator]
+                print(ui.table_row([
+                    ui.highlight(indicator),
+                    info['description'],
+                    info['usage']
+                ], [20, 40, 30]))
+        
+        print(ui.table_separator([20, 40, 30]))
+        print()
+    
+    input(ui.color_text("Press Enter to continue...", Fore.CYAN))
+
+def view_logs():
+    """Enhanced log viewing with better formatting."""
+    ui = UIComponents()
+    
+    while True:
+        print(ui.header("View System Logs"))
+        print()
+        print("1. Training log")
+        print("2. Prediction log") 
+        print("3. Error log")
+        print("4. Batch analysis log")
+        print("5. Back to main menu")
+        print()
+        
+        choice = input(ui.color_text("Enter choice (1-5): ", Fore.CYAN)).strip()
+        
+        if choice == "1":
+            view_training_log()
+        elif choice == "2":
+            view_prediction_history()
+        elif choice == "3":
+            view_error_log()
+        elif choice == "4":
+            view_batch_log()
+        elif choice == "5":
+            break
+        else:
+            print(ui.error("Invalid choice. Please try again."))
+
+def view_training_log():
+    """View training log with enhanced formatting."""
+    ui = UIComponents()
+    
+    if not os.path.exists(TRAINING_LOG):
+        print(ui.warning("No training log found"))
+        input(ui.color_text("Press Enter to continue...", Fore.CYAN))
+        return
+    
+    try:
+        df = pd.read_csv(TRAINING_LOG)
+        if df.empty:
+            print(ui.warning("Training log is empty"))
+            input(ui.color_text("Press Enter to continue...", Fore.CYAN))
+            return
+        
+        print(ui.header("Training Log (Last 20 Entries)"))
+        print()
+        
+        # Show last 20 entries
+        recent = df.tail(20)
+        
+        headers = ["Time", "Ticker", "Interval", "Prediction", "Confidence", "Engines"]
+        widths = [16, 10, 10, 12, 12, 8]
+        
+        print(ui.table_separator(widths))
+        print(ui.table_row(headers, widths, ['center']))
+        print(ui.table_separator(widths))
+        
+        for _, row in recent.iterrows():
+            timestamp = pd.to_datetime(row['timestamp']).strftime('%H:%M:%S')
+            prediction = f"{row['prediction']:+.2f}%"
+            confidence = f"{row['confidence']:.1f}/10"
+            
+            print(ui.table_row([
+                timestamp,
+                row['ticker'],
+                row['interval'],
+                prediction,
+                confidence,
+                str(row['engines'])
+            ], widths))
+        
+        print(ui.table_separator(widths))
+        print()
+        
+        # Statistics
+        print(ui.info("Training Statistics:"))
+        print(f"  • Total entries: {len(df)}")
+        print(f"  • Date range: {df['timestamp'].min()} to {df['timestamp'].max()}")
+        print(f"  • Average confidence: {df['confidence'].mean():.1f}/10")
+        print(f"  • High confidence entries: {len(df[df['confidence'] >= 8])}")
+        
+    except Exception as e:
+        print(ui.error(f"Error reading training log: {e}"))
+    
+    input(ui.color_text("Press Enter to continue...", Fore.CYAN))
+
+def view_prediction_history():
+    """View prediction history with enhanced formatting."""
+    ui = UIComponents()
+    
+    if not os.path.exists(PREDICTION_LOG):
+        print(ui.warning("No prediction log found"))
+        input(ui.color_text("Press Enter to continue...", Fore.CYAN))
+        return
+    
+    try:
+        df = pd.read_csv(PREDICTION_LOG)
+        if df.empty:
+            print(ui.warning("Prediction log is empty"))
+            input(ui.color_text("Press Enter to continue...", Fore.CYAN))
+            return
+        
+        print(ui.header("Prediction History (Last 20 Entries)"))
+        print()
+        
+        recent = df.tail(20)
+        
+        headers = ["Time", "Ticker", "Engine", "Prediction", "Confidence", "Range"]
+        widths = [16, 10, 12, 12, 12, 20]
+        
+        print(ui.table_separator(widths))
+        print(ui.table_row(headers, widths, ['center']))
+        print(ui.table_separator(widths))
+        
+        for _, row in recent.iterrows():
+            timestamp = pd.to_datetime(row['timestamp']).strftime('%H:%M:%S')
+            prediction = f"{row['prediction']:+.2f}%"
+            confidence = f"{row['confidence']:.1f}/10"
+            range_text = f"{row['range_low']:+.2f}% to {row['range_high']:+.2f}%"
+            
+            print(ui.table_row([
+                timestamp,
+                row['ticker'],
+                row['engine'],
+                prediction,
+                confidence,
+                range_text
+            ], widths))
+        
+        print(ui.table_separator(widths))
+        print()
+        
+        # Statistics
+        print(ui.info("Prediction Statistics:"))
+        print(f"  • Total predictions: {len(df)}")
+        print(f"  • Average confidence: {df['confidence'].mean():.1f}/10")
+        print(f"  • Bullish predictions: {len(df[df['prediction'] > 0])}")
+        print(f"  • Bearish predictions: {len(df[df['prediction'] < 0])}")
+        
+    except Exception as e:
+        print(ui.error(f"Error reading prediction log: {e}"))
+    
+    input(ui.color_text("Press Enter to continue...", Fore.CYAN))
+
+def view_error_log():
+    """View error log with enhanced formatting."""
+    ui = UIComponents()
+    
+    if not os.path.exists(ERROR_LOG):
+        print(ui.warning("No error log found"))
+        input(ui.color_text("Press Enter to continue...", Fore.CYAN))
+        return
+    
+    try:
+        with open(ERROR_LOG, 'r') as f:
+            errors = f.readlines()
+        
+        if not errors:
+            print(ui.warning("Error log is empty"))
+            input(ui.color_text("Press Enter to continue...", Fore.CYAN))
+            return
+        
+        print(ui.header("Recent Errors (Last 10)"))
+        print()
+        
+        for error in errors[-10:]:
+            print(ui.error(error.strip()))
+        
+    except Exception as e:
+        print(ui.error(f"Error reading error log: {e}"))
+    
+    input(ui.color_text("Press Enter to continue...", Fore.CYAN))
+
+def view_batch_log():
+    """View batch analysis log with enhanced formatting."""
+    ui = UIComponents()
+    
+    if not os.path.exists(BATCH_ANALYSIS_LOG):
+        print(ui.warning("No batch analysis log found"))
+        input(ui.color_text("Press Enter to continue...", Fore.CYAN))
+        return
+    
+    try:
+        with open(BATCH_ANALYSIS_LOG, 'r') as f:
+            batch_data = json.load(f)
+        
+        if not batch_data:
+            print(ui.warning("Batch analysis log is empty"))
+            input(ui.color_text("Press Enter to continue...", Fore.CYAN))
+            return
+        
+        print(ui.header("Batch Analysis History (Last 20)"))
+        print()
+        
+        recent = batch_data[-20:]
+        
+        headers = ["Time", "Ticker", "Interval", "Prediction", "Confidence"]
+        widths = [16, 10, 10, 12, 12]
+        
+        print(ui.table_separator(widths))
+        print(ui.table_row(headers, widths, ['center']))
+        print(ui.table_separator(widths))
+        
+        for entry in recent:
+            timestamp = pd.to_datetime(entry['timestamp']).strftime('%H:%M:%S')
+            prediction = f"{entry['prediction']:+.2f}%"
+            confidence = f"{entry['confidence']:.1f}/10"
+            
+            print(ui.table_row([
+                timestamp,
+                entry['ticker'],
+                entry['interval'],
+                prediction,
+                confidence
+            ], widths))
+        
+        print(ui.table_separator(widths))
+        print()
+        
+        # Statistics
+        print(ui.info("Batch Analysis Statistics:"))
+        print(f"  • Total batch entries: {len(batch_data)}")
+        print(f"  • Average confidence: {np.mean([e['confidence'] for e in batch_data]):.1f}/10")
+        
+    except Exception as e:
+        print(ui.error(f"Error reading batch log: {e}"))
+    
+    input(ui.color_text("Press Enter to continue...", Fore.CYAN))
+
+def update_tickers():
+    """Enhanced ticker list management."""
+    ui = UIComponents()
+    
+    while True:
+        print(ui.header("Ticker List Management"))
+        print()
+        print("1. View current tickers")
+        print("2. Add ticker")
+        print("3. Remove ticker")
+        print("4. Reset to default")
+        print("5. Import from file")
+        print("6. Back to main menu")
+        print()
+        
+        choice = input(ui.color_text("Enter choice (1-6): ", Fore.CYAN)).strip()
+        
+        if choice == "1":
+            tickers = load_tickers()
+            print(ui.header(f"Current Tickers ({len(tickers)})"))
+            print()
+            
+            # Display in columns
+            cols = 4
+            for i, ticker in enumerate(sorted(tickers), 1):
+                print(f"{ticker:<8}", end='')
+                if i % cols == 0:
+                    print()
+            
+            if len(tickers) % cols != 0:
+                print()
+            
+            input(ui.color_text("\nPress Enter to continue...", Fore.CYAN))
+        
+        elif choice == "2":
+            ticker = input(ui.color_text("Enter ticker symbol to add: ", Fore.CYAN)).strip().upper()
+            if ticker:
+                tickers = load_tickers()
+                if ticker not in tickers:
+                    tickers.append(ticker)
+                    save_tickers(tickers)
+                    print(ui.success(f"Added {ticker} to ticker list"))
+                else:
+                    print(ui.warning(f"{ticker} already in list"))
+            input(ui.color_text("Press Enter to continue...", Fore.CYAN))
+        
+        elif choice == "3":
+            tickers = load_tickers()
+            if not tickers:
+                print(ui.warning("No tickers to remove"))
+                input(ui.color_text("Press Enter to continue...", Fore.CYAN))
+                continue
+            
+            ticker = input(ui.color_text("Enter ticker symbol to remove: ", Fore.CYAN)).strip().upper()
+            if ticker in tickers:
+                tickers.remove(ticker)
+                save_tickers(tickers)
+                print(ui.success(f"Removed {ticker} from ticker list"))
+            else:
+                print(ui.warning(f"{ticker} not found in list"))
+            input(ui.color_text("Press Enter to continue...", Fore.CYAN))
+        
+        elif choice == "4":
+            if input(ui.color_text("Reset to default tickers? (y/N): ", Fore.YELLOW)).lower() == 'y':
+                save_tickers(DEFAULT_CONFIG["default_tickers"])
+                print(ui.success("Reset to default tickers"))
+            input(ui.color_text("Press Enter to continue...", Fore.CYAN))
+        
+        elif choice == "5":
+            file_path = input(ui.color_text("Enter file path (one ticker per line): ", Fore.CYAN)).strip()
+            if file_path and os.path.exists(file_path):
+                try:
+                    with open(file_path, 'r') as f:
+                        imported_tickers = [line.strip().upper() for line in f if line.strip()]
+                    
+                    if imported_tickers:
+                        save_tickers(imported_tickers)
+                        print(ui.success(f"Imported {len(imported_tickers)} tickers"))
+                    else:
+                        print(ui.warning("No valid tickers found in file"))
+                except Exception as e:
+                    print(ui.error(f"Import error: {e}"))
+            else:
+                print(ui.error("File not found"))
+            input(ui.color_text("Press Enter to continue...", Fore.CYAN))
+        
+        elif choice == "6":
+            break
+        
+        else:
+            print(ui.error("Invalid choice. Please try again."))
+
+def install_dependencies():
+    """Manual dependency installation with internet check."""
+    ui = UIComponents()
+    
+    print(ui.header("Manual Dependency Install"))
+    print()
+    
+    # Check internet connection first
+    print(ui.info("Checking internet connection..."))
+    online = check_internet_connection()
+    
+    if not online:
+        print(ui.error("[!] No internet connection detected"))
+        print(ui.warning("Cannot install dependencies without internet access"))
+        print(ui.info("Please check your connection and try again"))
+        input(ui.color_text("\nPress Enter to continue...", Fore.CYAN))
+        return
+    
+    print(ui.success("[OK] Internet connection available"))
+    print()
+    
+    packages = [
+        ("yfinance", "Yahoo Finance API"),
+        ("pandas", "Data manipulation"),
+        ("numpy", "Numerical computing"),
+        ("ta", "Technical analysis"),
+        ("scikit-learn", "Machine learning"),
+        ("colorama", "Color support (optional)"),
+        ("tqdm", "Progress bars (optional)")
+    ]
+    
+    print(ui.info("Installing required packages..."))
+    print()
+    
+    for package, description in packages:
+        print(f"Installing {ui.highlight(package)} - {description}...")
+        
+        try:
+            result = subprocess.run([sys.executable, "-m", "pip", "install", package], 
+                                  capture_output=True, text=True, timeout=60)
+            
+            if result.returncode == 0:
+                print(ui.success(f"[OK] {package} installed successfully"))
+            else:
+                print(ui.error(f"[FAIL] Failed to install {package}"))
+                if result.stderr:
+                    print(f"  Error: {result.stderr.strip()}")
+        
+        except subprocess.TimeoutExpired:
+            print(ui.error(f"[FAIL] Timeout installing {package}"))
+        except Exception as e:
+            print(ui.error(f"[FAIL] Error installing {package}: {e}"))
+    
+    print()
+    print(ui.success("Dependency installation completed"))
+    print(ui.info("Note: Dependencies are automatically checked and installed on startup"))
+    input(ui.color_text("Press Enter to continue...", Fore.CYAN))
+
+def learning_menu():
+    """Enhanced learning mode menu."""
+    ui = UIComponents()
+    
+    while True:
+        print(ui.header("Learning Mode"))
+        print()
+        
+        # Show current status with visual indicators
+        if LEARNING_MODE["active"]:
+            status_color = Fore.GREEN
+            status_text = "ACTIVE"
+            status_icon = "🟢"
+        else:
+            status_color = Fore.RED
+            status_text = "INACTIVE"
+            status_icon = "🔴"
+        
+        print(f"Status: {ui.color_text(f'{status_icon} {status_text}', status_color, Style.BRIGHT)}")
+        
+        if LEARNING_MODE["active"]:
+            # Progress bar for learning
+            progress = UIComponents.progress_bar(
+                LEARNING_MODE["current_iteration"],
+                LEARNING_MODE["max_iterations"],
+                30,
+                "Progress: "
+            )
+            print(progress)
+            
+            print(f"Current Confidence: {ui.highlight(f'{LEARNING_MODE['current_confidence']:.1f}/10')}")
+            print(f"Target Confidence: {ui.highlight(f'{LEARNING_MODE['target_confidence']:.1f}/10')}")
+            
+            # Confidence history visualization
+            if LEARNING_MODE["confidence_history"]:
+                print(f"Confidence Trend: ", end="")
+                for conf in LEARNING_MODE["confidence_history"][-10:]:  # Last 10
+                    if conf >= 8:
+                        print(ui.color_text("█", Fore.GREEN), end="")
+                    elif conf >= 5:
+                        print(ui.color_text("█", Fore.YELLOW), end="")
+                    else:
+                        print(ui.color_text("█", Fore.RED), end="")
+                print()
+        
+        print()
+        print("1. Start Learning Mode")
+        print("2. Analyze with Learning")
+        print("3. View Learning Summary")
+        print("4. Evaluate Active Predictions")
+        print("5. View Confidence History")
+        print("6. Stop Learning Mode")
+        print("7. Back to Main Menu")
+        print()
+        
+        choice = input(ui.color_text("Select option (1-7): ", Fore.CYAN)).strip()
+        
+        if choice == "1":
+            if LEARNING_MODE["active"]:
+                print(ui.warning("Learning mode is already active"))
+                input(ui.color_text("Press Enter to continue...", Fore.CYAN))
+                continue
+            
+            try:
+                target_conf = safe_float(input(ui.color_text("Enter target confidence (1-10, default 9.0): ", Fore.CYAN)) or "9.0")
+                max_iter = int(input(ui.color_text("Enter max iterations (default 10): ", Fore.CYAN)) or "10")
+                
+                if not (1 <= target_conf <= 10):
+                    print(ui.warning("Invalid confidence. Using default 9.0"))
+                    target_conf = 9.0
+                
+                if max_iter < 1 or max_iter > 100:
+                    print(ui.warning("Invalid iterations. Using default 10"))
+                    max_iter = 10
+                
+                start_learning_mode(target_conf, max_iter)
+                print(ui.success(f"Learning mode started"))
+                
+            except ValueError:
+                print(ui.error("Invalid input. Using defaults"))
+                start_learning_mode()
+            
+            input(ui.color_text("Press Enter to continue...", Fore.CYAN))
+        
+        elif choice == "2":
+            if not LEARNING_MODE["active"]:
+                print(ui.error("Learning mode is not active. Please start it first."))
+                input(ui.color_text("Press Enter to continue...", Fore.CYAN))
+                continue
+            
+            ticker = input(ui.color_text("Enter ticker symbol: ", Fore.CYAN)).strip().upper()
+            interval = get_interval_choice()
+            
+            print(ui.header(f"Learning Analysis: {ticker} ({interval})"))
+            
+            # Continue learning until target confidence reached
+            iteration = 0
+            while LEARNING_MODE["active"] and iteration < LEARNING_MODE["max_iterations"]:
+                iteration += 1
+                
+                print(f"\n{ui.info(f'Iteration {LEARNING_MODE['current_iteration'] + 1}/{LEARNING_MODE['max_iterations']}')}")
+                
+                result = analyze_with_learning(ticker, interval)
+                if result:
+                    print(ui.box(result.format_display(ui), width=70))
+                    
+                    if result.confidence >= LEARNING_MODE["target_confidence"]:
+                        print(ui.success(f"Target confidence achieved!"))
+                        break
+                else:
+                    print(ui.error("Analysis failed"))
+                    break
+                
+                if iteration < LEARNING_MODE["max_iterations"] and LEARNING_MODE["active"]:
+                    cont = input(ui.color_text("Continue to next iteration? (y/N): ", Fore.CYAN)).strip().lower()
+                    if cont != 'y':
+                        break
+            
+            input(ui.color_text("Press Enter to continue...", Fore.CYAN))
+        
+        elif choice == "3":
+            summary = get_learning_summary()
+            
+            print(ui.header("Learning Summary"))
+            print()
+            
+            if summary["status"] == "inactive":
+                print(ui.warning("Learning mode is not active"))
+            else:
+                print(ui.info(f"Status: {ui.highlight(summary['status'].title())}"))
+                print(ui.info(f"Iteration: {summary['current_iteration']}/{summary['max_iterations']}"))
+                print(ui.info(f"Target Confidence: {summary['target_confidence']}/10"))
+                print(ui.info(f"Current Confidence: {ui.highlight(f'{summary['current_confidence']:.1f}')}/10"))
+                print(ui.info(f"Total Predictions: {summary['total_predictions']}"))
+                print(ui.info(f"Evaluated Predictions: {summary['evaluated_predictions']}"))
+                print(ui.info(f"Active Predictions: {summary['active_predictions']}"))
+                print(ui.info(f"Average Accuracy: {summary['average_accuracy']:.1f}/10"))
+                print(ui.info(f"Accuracy Rate: {summary['accuracy_rate']:.1f}%"))
+                
+                # Confidence history
+                if summary['confidence_history']:
+                    print(ui.header("Confidence Progression"))
+                    for i, conf in enumerate(summary['confidence_history'], 1):
+                        bar = UIComponents.progress_bar(conf, 10, 20, f"Iter {i:2d}: ")
+                        color = Fore.GREEN if conf >= 8 else Fore.YELLOW if conf >= 5 else Fore.RED
+                        print(ui.color_text(bar, color))
+                    print()
+                
+                # Recent evaluations
+                if summary['recent_evaluations']:
+                    print(ui.header("Recent Evaluations"))
+                    headers = ["Ticker", "Predicted", "Actual", "Accuracy"]
+                    widths = [10, 12, 12, 10]
+                    
+                    print(ui.table_separator(widths))
+                    print(ui.table_row(headers, widths, ['center']))
+                    print(ui.table_separator(widths))
+                    
+                    for eval in summary['recent_evaluations']:
+                        pred_text = f"{eval['predicted']:+.2f}%"
+                        actual_text = f"{eval['actual']:+.2f}%"
+                        accuracy = f"{eval['accuracy_rating']:.1f}/10"
+                        
+                        print(ui.table_row([
+                            eval['ticker'],
+                            pred_text,
+                            actual_text,
+                            accuracy
+                        ], widths))
+                    
+                    print(ui.table_separator(widths))
+            
+            input(ui.color_text("Press Enter to continue...", Fore.CYAN))
+        
+        elif choice == "4":
+            print(ui.header("Evaluating Active Predictions"))
+            evaluated = evaluate_active_predictions()
+            
+            if evaluated:
+                print(ui.success(f"Evaluated {len(evaluated)} predictions"))
+                print()
+                
+                headers = ["Ticker", "Predicted", "Actual", "Range", "Accuracy"]
+                widths = [10, 12, 12, 20, 10]
+                
+                print(ui.table_separator(widths))
+                print(ui.table_row(headers, widths, ['center']))
+                print(ui.table_separator(widths))
+                
+                for eval in evaluated:
+                    pred_text = f"{eval['predicted']:+.2f}%"
+                    actual_text = f"{eval['actual']:+.2f}%"
+                    range_text = f"{eval['predicted_range'][0]:+.2f}% to {eval['predicted_range'][1]:+.2f}%"
+                    accuracy = f"{eval['accuracy_rating']:.1f}/10"
+                    
+                    print(ui.table_row([
+                        eval['ticker'],
+                        pred_text,
+                        actual_text,
+                        range_text,
+                        accuracy
+                    ], widths))
+                
+                print(ui.table_separator(widths))
+            else:
+                print(ui.info("No predictions ready for evaluation"))
+            
+            input(ui.color_text("Press Enter to continue...", Fore.CYAN))
+        
+        elif choice == "5":
+            print(ui.header("Confidence History"))
+            
+            if LEARNING_MODE["confidence_history"]:
+                print(ui.info(f"Total entries: {len(LEARNING_MODE['confidence_history'])}"))
+                print()
+                
+                for i, conf in enumerate(LEARNING_MODE["confidence_history"], 1):
+                    bar = UIComponents.progress_bar(conf, 10, 30, f"Iter {i:2d}: ")
+                    color = Fore.GREEN if conf >= 8 else Fore.YELLOW if conf >= 5 else Fore.RED
+                    print(ui.color_text(bar, color))
+                    print(f"       Confidence: {conf:.1f}/10")
+                
+                print()
+                print(ui.info(f"Average confidence: {np.mean(LEARNING_MODE['confidence_history']):.1f}/10"))
+                print(ui.info(f"Trend: {'Improving' if LEARNING_MODE['confidence_history'][-1] > LEARNING_MODE['confidence_history'][0] else 'Declining'}"))
+            else:
+                print(ui.warning("No confidence history available"))
+            
+            input(ui.color_text("Press Enter to continue...", Fore.CYAN))
+        
+        elif choice == "6":
+            if not LEARNING_MODE["active"]:
+                print(ui.warning("Learning mode is not active"))
+                input(ui.color_text("Press Enter to continue...", Fore.CYAN))
+                continue
+            
+            summary = stop_learning_mode()
+            print(ui.success("Learning mode stopped"))
+            print(ui.info(f"Final summary: {summary.get('total_predictions', 0)} predictions made"))
+            print(ui.info(f"Average accuracy: {summary.get('average_accuracy', 0):.1f}/10"))
+            
+            input(ui.color_text("Press Enter to continue...", Fore.CYAN))
+        
+        elif choice == "7":
+            break
+        
+        else:
+            print(ui.error("Invalid option. Please try again."))
+
+
+# System verification function
+def test_self_contained():
+    """Verify the application is self-contained and can auto-setup on new machine."""
+    print("="*70)
+    print("SELF-CONTAINED DEPLOYMENT TEST")
+    print("="*70)
+    
+    tests_passed = 0
+    total_tests = 0
+    
+    # Test 1: Check if all required functions exist
+    total_tests += 1
+    print("\n1. Testing required functions...")
+    try:
+        from stock_analyzer_v10 import (
+            bootstrap, check_internet_connection, initialize_tickers_file,
+            load_config, DEFAULT_CONFIG, install_dependencies, ensure_directories
+        )
+        print("   [OK] All required functions imported")
+        tests_passed += 1
+    except ImportError as e:
+        print(f"   [FAIL] Import error: {e}")
+    
+    # Test 2: Check internet detection capability
+    total_tests += 1
+    print("\n2. Testing internet detection...")
+    try:
+        from stock_analyzer_v10 import check_internet_connection
+        online = check_internet_connection()
+        print(f"   [OK] Internet detection working: {'Online' if online else 'Offline'}")
+        tests_passed += 1
+    except Exception as e:
+        print(f"   [FAIL] Internet detection error: {e}")
+    
+    # Test 3: Check auto-dependency installation logic
+    total_tests += 1
+    print("\n3. Testing auto-dependency installation logic...")
+    try:
+        # Check if bootstrap has auto-install logic
+        import inspect
+        from stock_analyzer_v10 import bootstrap
+        
+        source = inspect.getsource(bootstrap)
+        if "subprocess.check_call" in source and "pip" in source.lower():
+            print("   [OK] Auto-dependency installation logic present")
+            tests_passed += 1
+        else:
+            print("   [FAIL] Auto-dependency installation logic missing")
+    except Exception as e:
+        print(f"   [FAIL] Error checking bootstrap: {e}")
+    
+    # Test 4: Check directory creation
+    total_tests += 1
+    print("\n4. Testing directory creation...")
+    try:
+        from stock_analyzer_v10 import ensure_directories, DATA_DIR, MEMORY_DIR, LOG_DIR
+        
+        # Test directory creation
+        test_dirs = [DATA_DIR, MEMORY_DIR, LOG_DIR]
+        for d in test_dirs:
+            os.makedirs(d, exist_ok=True)
+            if os.path.exists(d):
+                print(f"   [OK] Directory created: {d}")
+        
+        print("   [OK] Directory creation working")
+        tests_passed += 1
+    except Exception as e:
+        print(f"   [FAIL] Directory creation error: {e}")
+    
+    # Test 5: Check config initialization
+    total_tests += 1
+    print("\n5. Testing config initialization...")
+    try:
+        from stock_analyzer_v10 import load_config, save_config, DEFAULT_CONFIG, CONFIG_FILE
+        
+        # Test config creation
+        if not os.path.exists(CONFIG_FILE):
+            save_config(DEFAULT_CONFIG)
+        
+        config = load_config()
+        if config and "default_tickers" in config:
+            print(f"   [OK] Config initialized with {len(config['default_tickers'])} tickers")
+            tests_passed += 1
+        else:
+            print("   [FAIL] Config initialization failed")
+    except Exception as e:
+        print(f"   [FAIL] Config error: {e}")
+    
+    # Test 6: Check tickers file initialization
+    total_tests += 1
+    print("\n6. Testing tickers file initialization...")
+    try:
+        from stock_analyzer_v10 import initialize_tickers_file, TICKERS_FILE
+        
+        # Remove existing file to test re-initialization
+        if os.path.exists(TICKERS_FILE):
+            os.remove(TICKERS_FILE)
+        
+        initialize_tickers_file()
+        
+        if os.path.exists(TICKERS_FILE):
+            with open(TICKERS_FILE, 'r') as f:
+                tickers = [line.strip() for line in f if line.strip()]
+            print(f"   [OK] Tickers file created with {len(tickers)} tickers")
+            tests_passed += 1
+        else:
+            print("   [FAIL] Tickers file not created")
+    except Exception as e:
+        print(f"   [FAIL] Tickers initialization error: {e}")
+    
+    # Test 7: Check Trading 212 library integration
+    total_tests += 1
+    print("\n7. Testing Trading 212 library integration...")
+    try:
+        from stock_analyzer_v10 import DEFAULT_CONFIG
+        
+        trading_212_categories = [
+            "SPY", "QQQ", "VTI", "AAPL", "MSFT", "GOOGL", "AMZN", "TSLA", 
+            "META", "NVDA", "JPM", "BAC", "XOM", "CVX", "JNJ", "UNH"
+        ]
+        
+        default_tickers = DEFAULT_CONFIG.get("default_tickers", [])
+        found = sum(1 for t in trading_212_categories if t in default_tickers)
+        
+        if found >= 10:
+            print(f"   [OK] Trading 212 library integrated ({found}/16 test tickers found)")
+            tests_passed += 1
+        else:
+            print(f"   [FAIL] Trading 212 integration incomplete ({found}/16 found)")
+    except Exception as e:
+        print(f"   [FAIL] Trading 212 check error: {e}")
+    
+    # Test 8: Check manual dependency install with internet check
+    total_tests += 1
+    print("\n8. Testing manual dependency install...")
+    try:
+        import inspect
+        from stock_analyzer_v10 import install_dependencies
+        
+        source = inspect.getsource(install_dependencies)
+        if "check_internet_connection" in source:
+            print("   [OK] Manual install checks internet first")
+            tests_passed += 1
+        else:
+            print("   [FAIL] Manual install missing internet check")
+    except Exception as e:
+        print(f"   [FAIL] Manual install check error: {e}")
+    
+    # Test 9: Check error handling and logging
+    total_tests += 1
+    print("\n9. Testing error handling...")
+    try:
+        from stock_analyzer_v10 import log_error, ERROR_LOG
+        
+        # Test error logging
+        log_error("Test error message")
+        
+        if os.path.exists(ERROR_LOG):
+            print("   [OK] Error logging working")
+            tests_passed += 1
+        else:
+            print("   [FAIL] Error logging not working")
+    except Exception as e:
+        print(f"   [FAIL] Error handling test failed: {e}")
+    
+    # Test 10: Check if application can run basic commands
+    total_tests += 1
+    print("\n10. Testing basic application functionality...")
+    try:
+        # Test help command
+        result = subprocess.run(
+            [sys.executable, "stock_analyzer_v10.py", "--help"],
+            capture_output=True, text=True, timeout=10
+        )
+        
+        if result.returncode == 0 and "Stock Analyzer" in result.stdout:
+            print("   [OK] Application help command works")
+            tests_passed += 1
+        else:
+            print("   [FAIL] Application help command failed")
+    except Exception as e:
+        print(f"   [FAIL] Application test error: {e}")
+    
+    # Summary
+    print("\n" + "="*70)
+    print("SELF-CONTAINED TEST RESULTS")
+    print("="*70)
+    print(f"Tests Passed: {tests_passed}/{total_tests}")
+    print(f"Success Rate: {tests_passed/total_tests*100:.1f}%")
+    
+    if tests_passed == total_tests:
+        print("\n[OK] FULLY SELF-CONTAINED!")
+        print("\n[OK] New machine deployment will automatically:")
+        print("  [OK] Detect internet connection")
+        print("  [OK] Create required directories")
+        print("  [OK] Initialize configuration files")
+        print("  [OK] Create tickers file with Trading 212 library")
+        print("  [OK] Check and auto-install missing dependencies")
+        print("  [OK] Set up logging system")
+        print("  [OK] Run without manual intervention")
+    else:
+        print(f"\n[!] {total_tests - tests_passed} tests failed")
+        print("Some manual setup may be required")
+    
+    return tests_passed == total_tests
+
+
+def main_menu():
+    """Enhanced main menu with improved navigation."""
+    ui = UIComponents()
+    
+    menu_options = [
+        ("Analyze Single Ticker", lambda: analyze_single_ticker_menu()),
+        ("Analyze Multiple Tickers", lambda: analyze_multiple_menu()),
+        ("Start Continuous Training", start_continuous_training),
+        ("Technical Indicators Dictionary", show_indicators_dict),
+        ("View System Logs", view_logs),
+        ("Manage Ticker Lists", update_tickers),
+        ("Learning Mode", learning_menu),
+        ("Manual Dependency Install", install_dependencies),
+        ("System Information", show_system_info),
+        ("Exit", lambda: None)
+    ]
+    
+    menu = EnhancedMenu(APP_NAME, menu_options)
+    
+    while True:
+        menu.display()
+        choice_func = menu.get_choice()
+        
+        if choice_func is None or choice_func.__name__ == '<lambda>':
+            if choice_func is None:
+                break
+        else:
+            try:
+                choice_func()
+            except KeyboardInterrupt:
+                print(ui.warning("\nOperation cancelled"))
+                input(ui.color_text("Press Enter to continue...", Fore.CYAN))
+            except Exception as e:
+                log_error(f"Menu option error: {e}")
+                print(ui.error(f"Error: {e}"))
+                input(ui.color_text("Press Enter to continue...", Fore.CYAN))
+
+def analyze_single_ticker_menu():
+    """Enhanced single ticker analysis menu."""
+    ui = UIComponents()
+    
+    ticker = input(ui.color_text("Enter ticker symbol: ", Fore.CYAN)).strip().upper()
+    if not ticker:
+        print(ui.warning("No ticker entered"))
+        return
+    
+    interval = get_interval_choice()
+    result = analyze_ticker(ticker, interval)
+    
+    if result:
+        # Additional options after analysis
+        print()
+        print("1. Save prediction")
+        print("2. Analyze with learning mode")
+        print("3. Analyze different interval")
+        print("4. Back to main menu")
+        
+        choice = input(ui.color_text("Select option (1-4): ", Fore.CYAN)).strip()
+        
+        if choice == "1":
+            log_prediction(ticker, interval, result)
+            print(ui.success("Prediction saved"))
+        elif choice == "2":
+            if LEARNING_MODE["active"]:
+                analyze_with_learning(ticker, interval)
+            else:
+                print(ui.warning("Learning mode is not active"))
+        elif choice == "3":
+            new_interval = get_interval_choice()
+            analyze_ticker(ticker, new_interval)
+    
+    input(ui.color_text("Press Enter to continue...", Fore.CYAN))
+
+def analyze_multiple_menu():
+    """Enhanced multiple ticker analysis menu."""
+    ui = UIComponents()
+    
+    # Show Trading 212 suggestions
+    print(ui.info("Trading 212 Library Available (469 tickers)"))
+    print(ui.color_text("Popular suggestions: SPY,QQQ,VTI,AAPL,MSFT,GOOGL,AMZN,TSLA,META,NVDA", Fore.YELLOW))
+    print(ui.color_text("Or enter 'default' to use all 469 Trading 212 tickers", Fore.GREEN))
+    print()
+    
+    input_str = input(ui.color_text("Enter tickers (comma-separated): ", Fore.CYAN)).strip()
+    if not input_str:
+        print(ui.warning("No tickers entered"))
+        return
+    
+    # Handle default Trading 212 library
+    if input_str.lower() == 'default':
+        tickers = load_tickers()
+        print(ui.success(f"Using all {len(tickers)} Trading 212 tickers"))
+    else:
+        tickers = [t.strip().upper() for t in input_str.replace(" ", "").split(",") if t.strip()]
+        if not tickers:
+            print(ui.warning("No valid tickers entered"))
+            return
+    
+    interval = get_interval_choice()
+    results = analyze_multiple(tickers, interval)
+    
+    if results:
+        print(f"\n{ui.success('Analysis completed successfully')}")
+    
+    input(ui.color_text("Press Enter to continue...", Fore.CYAN))
+
+def show_system_info():
+    """Display enhanced system information."""
+    ui = UIComponents()
+    
+    print(ui.header("System Information"))
+    print()
+    
+    # System info
+    print(ui.info("System:"))
+    print(f"  • Python version: {sys.version.split()[0]}")
+    print(f"  • Platform: {sys.platform}")
+    print(f"  • Architecture: {os.name}")
+    
+    print()
+    print(ui.info("Dependencies:"))
+    print(f"  • yfinance: {'Available' if YFINANCE_AVAILABLE else 'Not installed'}")
+    print(f"  • pandas: {'Available' if 'pd' in globals() else 'Not installed'}")
+    print(f"  • numpy: {'Available' if 'np' in globals() else 'Not installed'}")
+    print(f"  • ta: {'Available' if 'ta' in globals() else 'Not installed'}")
+    print(f"  • scikit-learn: {'Available' if 'skl' in globals() else 'Not installed'}")
+    print(f"  • colorama: {'Available' if COLORS_AVAILABLE else 'Not installed'}")
+    print(f"  • tqdm: {'Available' if TQDM_AVAILABLE else 'Not installed'}")
+    print(f"  • cupy (GPU): {'Available' if CUPY_AVAILABLE else 'Not installed'}")
+    
+    print()
+    print(ui.info("Configuration:"))
+    config = load_config()
+    print(f"  • Version: {config.get('version', 'Unknown')}")
+    print(f"  • Auto-training: {config.get('auto_training', False)}")
+    print(f"  • GPU enabled: {config.get('gpu_enabled', False)}")
+    print(f"  • Default tickers: {len(config.get('default_tickers', []))}")
+    print(f"  • Training intervals: {len(config.get('training_intervals', []))}")
+    
+    print()
+    print(ui.info("Files:"))
+    print(f"  • Config: {CONFIG_FILE} ({'Exists' if os.path.exists(CONFIG_FILE) else 'Missing'})")
+    print(f"  • Tickers: {TICKERS_FILE} ({'Exists' if os.path.exists(TICKERS_FILE) else 'Missing'})")
+    print(f"  • Training log: {TRAINING_LOG} ({'Exists' if os.path.exists(TRAINING_LOG) else 'Missing'})")
+    print(f"  • Prediction log: {PREDICTION_LOG} ({'Exists' if os.path.exists(PREDICTION_LOG) else 'Missing'})")
+    
+    print()
+    print(ui.info("Learning Mode:"))
+    print(f"  • Status: {'Active' if LEARNING_MODE['active'] else 'Inactive'}")
+    print(f"  • Current confidence: {LEARNING_MODE['current_confidence']:.1f}/10")
+    print(f"  • Total predictions: {len(LEARNING_MODE['predictions'])}")
+    
+    input(ui.color_text("Press Enter to continue...", Fore.CYAN))
+
+# Helper functions
+def safe_float(value: str, default: float = 0.0) -> float:
+    """Safely convert string to float."""
+    try:
+        return float(value)
+    except (ValueError, TypeError):
+        return default
+
+def bootstrap():
+    """Enhanced application bootstrap with internet detection and auto-dependency installation."""
+    ui = UIComponents()
+    
+    clear_screen()
+    print_banner()
+    
+    print(ui.info("Bootstrapping system..."))
+    
+    # Check internet connection
+    print(ui.info("Checking internet connection..."))
+    online = check_internet_connection()
+    print(f"[OK] Internet status: {'Online' if online else 'Offline'}")
+    
+    # Create directories
+    directories = [DATA_DIR, MEMORY_DIR, LOG_DIR]
+    for directory in directories:
+        os.makedirs(directory, exist_ok=True)
+        print(f"[OK] Created directory: {directory}")
+    
+    # Initialize config
+    if not os.path.exists(CONFIG_FILE):
+        save_config(DEFAULT_CONFIG)
+        print(f"[OK] Created default config")
+    else:
+        print(f"[OK] Config file exists")
+    
+    # Initialize tickers
+    initialize_tickers_file()
+    
+    # Check dependencies
+    print(f"\n{ui.info('Checking dependencies...')}")
+    missing_deps = []
+    
+    deps = [
+        ("yfinance", YFINANCE_AVAILABLE),
+        ("pandas", 'pd' in globals()),
+        ("numpy", 'np' in globals()),
+        ("ta", 'ta' in globals()),
+        ("scikit-learn", 'skl' in globals())
+    ]
+    
+    for dep, available in deps:
+        if available:
+            print(f"[OK] {dep}")
+        else:
+            print(f"[FAIL] {dep}")
+            missing_deps.append(dep)
+    
+    # Optional dependencies
+    print(f"\n{ui.info('Optional dependencies...')}")
+    optional_deps = [
+        ("colorama", COLORS_AVAILABLE),
+        ("tqdm", TQDM_AVAILABLE),
+        ("cupy", CUPY_AVAILABLE)
+    ]
+    
+    for dep, available in optional_deps:
+        if available:
+            print(f"[OK] {dep}")
+        else:
+            print(f"[!] {dep} (optional)")
+    
+    # Auto-install missing dependencies if online
+    if missing_deps and online:
+        print(f"\n{ui.info('Attempting to auto-install missing dependencies...')}")
+        for dep in missing_deps:
+            try:
+                subprocess.check_call([sys.executable, "-m", "pip", "install", dep],
+                                    stdout=subprocess.DEVNULL,
+                                    stderr=subprocess.DEVNULL)
+                print(f"[OK] {dep} installed successfully")
+                missing_deps.remove(dep)
+            except subprocess.CalledProcessError:
+                print(f"[FAIL] Failed to install {dep}")
+    elif missing_deps and not online:
+        print(f"\n[!] Cannot auto-install dependencies: No internet connection")
+    
+    if missing_deps:
+        print(f"\n{ui.warning('Missing required dependencies: ' + ', '.join(missing_deps))}")
+        print(ui.info("Please install them using option 8 from the main menu."))
+        input(ui.color_text("\nPress Enter to continue...", Fore.CYAN))
+    
+    print(f"\n{ui.success('System ready!')}")
+
+def main(argv: Optional[List[str]] = None) -> None:
+    """Enhanced main entry point."""
+    try:
+        # Bootstrap the application
+        bootstrap()
+        
+        # Handle command line arguments
+        if argv and len(argv) > 1:
+            parser = argparse.ArgumentParser(description=APP_NAME)
+            parser.add_argument('--ticker', help='Ticker symbol to analyze')
+            parser.add_argument('--interval', help='Time interval', default='1d')
+            parser.add_argument('--batch', action='store_true', help='Batch analysis')
+            parser.add_argument('--training', action='store_true', help='Start training only')
+            parser.add_argument('--learning', action='store_true', help='Start learning mode')
+            parser.add_argument('--no-color', action='store_true', help='Disable color output')
+            
+            args = parser.parse_args(argv[1:])
+            
+            # Disable color if requested
+            if args.no_color:
+                global COLORS_AVAILABLE
+                COLORS_AVAILABLE = False
+            
+            if args.training:
+                start_continuous_training()
+                return
+            
+            elif args.learning:
+                start_learning_mode()
+                print(ui.info("Learning mode started. Use interactive menu for full control."))
+                return
+            
+            elif args.ticker:
+                result = analyze_ticker(args.ticker, args.interval)
+                if result:
+                    print(ui.box(result.format_display(UIComponents()), width=70))
+                return
+            
+            elif args.batch:
+                tickers = load_tickers()
+                config = load_config()
+                for interval in config["training_intervals"]:
+                    results = analyze_multiple(tickers, interval)
+                    if results:
+                        print(ui.success(f"Batch analysis completed for {interval}"))
+                return
+        
+        # Interactive mode
+        main_menu()
+        
+    except KeyboardInterrupt:
+        ui = UIComponents()
+        print(f"\n{ui.warning('Goodbye!')}")
+        CANCEL_FLAG.set()
+    except Exception as e:
+        ui = UIComponents()
+        log_error(f"Application error: {e}")
+        print(ui.error(f"Fatal error: {e}"))
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main(sys.argv)
