@@ -1,0 +1,64 @@
+{
+  "version": "14.0",
+  "risk_profile": "medium",
+  "model": {
+    "use_gpu": false,
+    "confidence_threshold": 0.65,
+    "retrain_interval_days": 7
+  },
+  "risk_management": {
+    "max_equity_risk_per_trade": 2.0,
+    "max_combined_exposure": 10.0,
+    "min_position_value": 10.0
+  },
+  "browser_automation": {
+    "library": "undetected-chromedriver",
+    "headless": false,
+    "human_like_delays": true,
+    "trading212": {
+      "demo_mode": true,
+      "credentials_encrypted": false
+    }
+  },
+  "timeframes": {
+    "cfd": ["1m", "5m", "10m", "15m", "1h"],
+    "investment": ["1d", "1w"]
+  },
+  "sentiment": {
+    "enabled": true,
+    "override_threshold": 0.7,
+    "news_sources": ["yahoo_finance"]
+  },
+  "logging": {
+    "log_level": "INFO",
+    "log_trades": true,
+    "log_predictions": true
+  },
+  "portability": {
+    "use_relative_paths": true,
+    "data_in_project_folder": true
+  },
+  "data_providers": {
+    "primary": "yahoo_finance",
+    "fallbacks": ["alpha_vantage", "polygon"],
+    "use_multiple_providers": true,
+    "alpha_vantage_api_key": "",
+    "polygon_api_key": "",
+    "retry_enabled": true,
+    "max_retries": 3,
+    "retry_base_delay": 1.0
+  },
+  "cache": {
+    "max_age_days": 30,
+    "max_size_mb": 1000.0,
+    "auto_prune": false,
+    "auto_prune_threshold_mb": 2000.0
+  },
+  "ticker_validation": {
+    "cache_duration_hours": 24,
+    "batch_size": 10,
+    "auto_audit": false,
+    "audit_interval_days": 30
+  }
+}
+

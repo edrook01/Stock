@@ -1,0 +1,6 @@
+[2025-11-22 13:54:06] ERROR: Indicator computation error: Data must be 1-dimensional, got ndarray of shape (1637, 1) instead
+[2025-11-22 13:54:06] ERROR: Statistical engine error: The truth value of a Series is ambiguous. Use a.empty, a.bool(), a.item(), a.any() or a.all().
+[2025-11-22 13:54:06] ERROR: Technical engine error: 'SMA20'
+[2025-11-22 13:54:06] ERROR: Deep learning engine error: UnifiedDeepEngine.predict() takes 4 positional arguments but 6 were given
+[2025-11-22 13:54:07] ERROR: Prediction logging error: The truth value of a Series is ambiguous. Use a.empty, a.bool(), a.item(), a.any() or a.all().
+[2025-11-22 13:54:07] ERROR: Training cycle error: 'tqdm' object is not an iterator
