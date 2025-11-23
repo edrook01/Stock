@@ -12,7 +12,7 @@ import json
 import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
 # Optional dependencies - handle gracefully if not installed
 try:
@@ -22,12 +22,16 @@ except ImportError:
     AIOHTTP_AVAILABLE = False
     aiohttp = None
 
-try:
+# Use TYPE_CHECKING to avoid evaluating type hints when pandas is None
+if TYPE_CHECKING:
     import pandas as pd
-    PANDAS_AVAILABLE = True
-except ImportError:
-    PANDAS_AVAILABLE = False
-    pd = None
+else:
+    try:
+        import pandas as pd
+        PANDAS_AVAILABLE = True
+    except ImportError:
+        PANDAS_AVAILABLE = False
+        pd = None
 
 # Handle both relative and absolute imports for portability
 try:
@@ -102,7 +106,7 @@ def _is_cache_valid(timestamp_str: str) -> bool:
         return False
 
 
-async def _fetch_from_yahoo_finance(ticker: str, interval: str) -> Optional[pd.DataFrame]:
+async def _fetch_from_yahoo_finance(ticker: str, interval: str) -> Optional['pd.DataFrame']:
     """
     Fetch price data from Yahoo Finance API using aiohttp.
     
@@ -206,7 +210,7 @@ async def _fetch_from_yahoo_finance(ticker: str, interval: str) -> Optional[pd.D
         return None
 
 
-def _save_to_cache(ticker: str, interval: str, df: pd.DataFrame) -> None:
+def _save_to_cache(ticker: str, interval: str, df: 'pd.DataFrame') -> None:
     """
     Save DataFrame to SQLite cache as JSON blob.
     
@@ -256,7 +260,7 @@ def _save_to_cache(ticker: str, interval: str, df: pd.DataFrame) -> None:
         pass
 
 
-def _load_from_cache(ticker: str, interval: str) -> Optional[pd.DataFrame]:
+def _load_from_cache(ticker: str, interval: str) -> Optional['pd.DataFrame']:
     """
     Load DataFrame from SQLite cache if valid.
     
@@ -315,7 +319,7 @@ def _load_from_cache(ticker: str, interval: str) -> Optional[pd.DataFrame]:
         return None
 
 
-async def fetch_prices(ticker: str, interval: str, use_multiple_providers: bool = True) -> Optional[pd.DataFrame]:
+async def fetch_prices(ticker: str, interval: str, use_multiple_providers: bool = True) -> Optional['pd.DataFrame']:
     """
     Fetch price data with caching and multiple provider support.
     

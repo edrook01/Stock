@@ -98,6 +98,18 @@ class SentimentAnalyzer:
             "is_major_event": len(major_events) > 0
         }
     
+    def analyze(self, text: str) -> Dict[str, any]:
+        """
+        Alias for analyze_text() for backward compatibility.
+        
+        Args:
+            text: Text to analyze
+            
+        Returns:
+            Dictionary with sentiment analysis results
+        """
+        return self.analyze_text(text)
+    
     def analyze_news_list(self, news_items: List[Dict]) -> Dict[str, any]:
         """
         Analyze sentiment from a list of news items.

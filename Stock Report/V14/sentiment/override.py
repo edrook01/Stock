@@ -3,7 +3,7 @@ Sentiment Override Logic
 Blocks trades or adjusts strategy based on sentiment and news events.
 """
 
-from typing import Dict, Optional, List, Tuple
+from typing import Dict, Optional, List, Tuple, Any
 from datetime import datetime, timedelta
 
 # Handle both relative and absolute imports for portability
@@ -82,6 +82,19 @@ class SentimentOverride:
                 return (True, "Protective mode active due to major market events")
         
         return (False, "OK")
+    
+    def check_sentiment(self, ticker: str) -> Dict[str, Any]:
+        """
+        Check sentiment for a ticker (wrapper for should_block_trade for backward compatibility).
+        
+        Args:
+            ticker: Stock ticker symbol
+            
+        Returns:
+            Dictionary with 'blocked' (bool) and 'reason' (str) keys
+        """
+        should_block, reason = self.should_block_trade(ticker)
+        return {"blocked": should_block, "reason": reason}
     
     def block_ticker(self, ticker: str, until: Optional[datetime] = None) -> None:
         """

@@ -68,17 +68,31 @@ class MenuController:
     
     def display_main_menu(self):
         """Display main menu."""
-        print("\n" + "=" * 70)
-        print("  STOCK ANALYZER V14 - MAIN MENU")
-        print("=" * 70)
-        print(f"\nCurrent Risk Profile: {self.current_profile.value.upper()}")
-        print("\n1. Core Analysis")
-        print("2. Learning & Training")
-        print("3. Data & Logs")
-        print("4. System & Maintenance")
-        print("5. V14 Features")
-        print("\n0. Exit")
-        print("-" * 70)
+        try:
+            print("\n" + "=" * 70)
+            print("  STOCK ANALYZER V14 - MAIN MENU")
+            print("=" * 70)
+            print(f"\nCurrent Risk Profile: {self.current_profile.value.upper()}")
+            print("\n1. Core Analysis")
+            print("2. Learning & Training")
+            print("3. Data & Logs")
+            print("4. System & Maintenance")
+            print("5. V14 Features")
+            print("\n0. Exit")
+            print("-" * 70)
+        except Exception as e:
+            print(f"\nERROR displaying menu: {e}")
+            # Fallback to basic menu
+            print("\n" + "=" * 70)
+            print("  STOCK ANALYZER V14 - MAIN MENU")
+            print("=" * 70)
+            print("\n1. Core Analysis")
+            print("2. Learning & Training")
+            print("3. Data & Logs")
+            print("4. System & Maintenance")
+            print("5. V14 Features")
+            print("\n0. Exit")
+            print("-" * 70)
     
     def display_v14_features_menu(self):
         """Display V14-specific features menu."""
@@ -96,24 +110,39 @@ class MenuController:
     
     def run(self):
         """Run main menu loop."""
-        while self.running:
-            self.display_main_menu()
-            choice = input("\nEnter choice: ").strip().upper()
-            
-            if choice == "0":
-                self.running = False
-            elif choice == "1":
-                self._handle_analysis_menu()
-            elif choice == "2":
-                self._handle_learning_menu()
-            elif choice == "3":
-                self._handle_data_menu()
-            elif choice == "4":
-                self._handle_system_menu()
-            elif choice == "5":
-                self._handle_v14_features_menu()
-            else:
-                print("Invalid choice. Please try again.")
+        try:
+            while self.running:
+                try:
+                    self.display_main_menu()
+                    choice = input("\nEnter choice: ").strip().upper()
+                    
+                    if choice == "0":
+                        self.running = False
+                    elif choice == "1":
+                        self._handle_analysis_menu()
+                    elif choice == "2":
+                        self._handle_learning_menu()
+                    elif choice == "3":
+                        self._handle_data_menu()
+                    elif choice == "4":
+                        self._handle_system_menu()
+                    elif choice == "5":
+                        self._handle_v14_features_menu()
+                    else:
+                        print("Invalid choice. Please try again.")
+                except KeyboardInterrupt:
+                    print("\n\nExiting menu...")
+                    self.running = False
+                except Exception as e:
+                    print(f"\nERROR in menu: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    input("\nPress Enter to continue...")
+        except Exception as e:
+            print(f"\nFATAL ERROR in menu system: {e}")
+            import traceback
+            traceback.print_exc()
+            raise
     
     def _handle_v14_features_menu(self):
         """Handle V14 features menu."""
@@ -428,6 +457,7 @@ class MenuController:
             print("2. Cache Management")
             print("3. Update Data Providers/API Keys")
             print("4. Check for Updates/Patchnotes")
+            print("5. Settings (Risk Level & Constant Learning)")
             print("\n0. Back to Main Menu")
             print("-" * 70)
             
@@ -443,6 +473,8 @@ class MenuController:
                 self._update_data_providers()
             elif choice == "4":
                 self._check_for_updates()
+            elif choice == "5":
+                self._settings_menu()
             else:
                 print("Invalid choice.")
     
@@ -603,6 +635,158 @@ class MenuController:
         
         except Exception as e:
             print(f"❌ Error: {e}")
+        
+        input("\nPress Enter to continue...")
+    
+    def _settings_menu(self):
+        """Settings menu with risk level and constant learning controls."""
+        while True:
+            print("\n" + "=" * 70)
+            print("  SETTINGS MENU")
+            print("=" * 70)
+            print("\n1. Risk Level Configuration")
+            print("2. Constant Learning (Function 3) Settings")
+            print("3. View Constant Learning Statistics")
+            print("\n0. Back to System Menu")
+            print("-" * 70)
+            
+            choice = input("\nEnter choice: ").strip().upper()
+            
+            if choice == "0":
+                break
+            elif choice == "1":
+                self._select_risk_profile()
+            elif choice == "2":
+                self._constant_learning_settings()
+            elif choice == "3":
+                self._view_constant_learning_stats()
+            else:
+                print("Invalid choice.")
+    
+    def _constant_learning_settings(self):
+        """Constant learning settings configuration."""
+        print("\n" + "=" * 70)
+        print("  CONSTANT LEARNING SETTINGS (Function 3)")
+        print("=" * 70)
+        
+        try:
+            from learning.constant_learning_engine import get_constant_learning_engine
+            from learning.parameter_optimizer import get_parameter_optimizer
+            from core.timeframes import CONSTANT_LEARNING_INTERVALS
+            from core.portable_paths import get_data_path
+            import json
+            
+            engine = get_constant_learning_engine()
+            optimizer = get_parameter_optimizer()
+            
+            # Load config
+            config_file = get_data_path() / 'config_v14.json'
+            if config_file.exists():
+                with open(config_file, 'r') as f:
+                    config = json.load(f)
+            else:
+                config = {}
+            
+            if "constant_learning" not in config:
+                config["constant_learning"] = {
+                    "enabled": False,
+                    "intervals": CONSTANT_LEARNING_INTERVALS.copy(),
+                    "evaluation_frequency_seconds": 5.0,
+                    "trade_outcome_weight": 3.0,
+                    "max_predictions_per_cycle": 10
+                }
+            
+            cl_config = config["constant_learning"]
+            
+            # Current status
+            status = engine.get_status()
+            print(f"\nCurrent Status:")
+            print(f"  Enabled: {'✅ Yes' if status['enabled'] else '❌ No'}")
+            print(f"  Running: {'✅ Yes' if status['running'] else '❌ No'}")
+            print(f"  Active Intervals: {', '.join(status['active_intervals'])}")
+            print(f"  Active Tickers: {status['active_tickers_count']}")
+            
+            # Enable/Disable
+            print("\n" + "-" * 70)
+            enable = input("Enable constant learning? (y/n) [current: {}]: ".format(
+                "Yes" if cl_config.get("enabled", False) else "No"
+            )).strip().lower()
+            
+            if enable == 'y':
+                cl_config["enabled"] = True
+                engine.set_enabled(True)
+            elif enable == 'n':
+                cl_config["enabled"] = False
+                engine.set_enabled(False)
+            
+            if cl_config["enabled"]:
+                # Intervals selection
+                print(f"\nAvailable intervals: {', '.join(CONSTANT_LEARNING_INTERVALS)}")
+                intervals_input = input(f"Select intervals (comma-separated, or Enter for all): ").strip()
+                if intervals_input:
+                    selected = [i.strip() for i in intervals_input.split(',')]
+                    valid_intervals = [i for i in selected if i in CONSTANT_LEARNING_INTERVALS]
+                    if valid_intervals:
+                        cl_config["intervals"] = valid_intervals
+                        engine.set_active_intervals(valid_intervals)
+                else:
+                    cl_config["intervals"] = CONSTANT_LEARNING_INTERVALS.copy()
+                    engine.set_active_intervals(CONSTANT_LEARNING_INTERVALS.copy())
+                
+                # Evaluation frequency
+                freq_input = input(f"Evaluation frequency in seconds [current: {cl_config.get('evaluation_frequency_seconds', 5.0)}]: ").strip()
+                if freq_input:
+                    try:
+                        freq = float(freq_input)
+                        cl_config["evaluation_frequency_seconds"] = freq
+                        engine.evaluation_frequency_seconds = freq
+                    except ValueError:
+                        print("Invalid input, keeping current value")
+                
+                # Trade outcome weight
+                weight_input = input(f"Trade outcome weight (1.0-5.0) [current: {cl_config.get('trade_outcome_weight', 3.0)}]: ").strip()
+                if weight_input:
+                    try:
+                        weight = float(weight_input)
+                        if 1.0 <= weight <= 5.0:
+                            cl_config["trade_outcome_weight"] = weight
+                            optimizer.set_trade_outcome_weight(weight)
+                        else:
+                            print("Weight must be between 1.0 and 5.0")
+                    except ValueError:
+                        print("Invalid input, keeping current value")
+            
+            # Save config
+            config["constant_learning"] = cl_config
+            with open(config_file, 'w') as f:
+                json.dump(config, f, indent=2)
+            
+            print("\n✅ Settings saved!")
+        
+        except Exception as e:
+            print(f"❌ Error: {e}")
+            import traceback
+            traceback.print_exc()
+        
+        input("\nPress Enter to continue...")
+    
+    def _view_constant_learning_stats(self):
+        """View constant learning statistics."""
+        print("\n" + "=" * 70)
+        print("  CONSTANT LEARNING STATISTICS")
+        print("=" * 70)
+        
+        try:
+            from learning.learning_statistics import get_learning_statistics
+            
+            stats = get_learning_statistics()
+            report = stats.generate_report()
+            print("\n" + report)
+        
+        except Exception as e:
+            print(f"❌ Error: {e}")
+            import traceback
+            traceback.print_exc()
         
         input("\nPress Enter to continue...")
 
