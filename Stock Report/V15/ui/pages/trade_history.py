@@ -4,11 +4,19 @@ Trade history viewing, filtering, and analysis with performance metrics.
 """
 
 import streamlit as st
-import pandas as pd
 import sys
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional
+
+# Handle pandas import with error handling
+try:
+    import pandas as pd
+    PANDAS_AVAILABLE = True
+except ImportError:
+    PANDAS_AVAILABLE = False
+    pd = None
+    st.error("⚠️ pandas is not installed. Please install it with: pip install pandas")
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 

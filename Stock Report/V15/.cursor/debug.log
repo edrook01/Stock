@@ -152,3 +152,18 @@
 {"sessionId": "debug-session", "runId": "run1", "hypothesisId": "B", "location": "Stock Analyzer V15.py:main", "message": "After is_first_run", "data": {"is_first_run": false}, "timestamp": 1764021750854}
 {"sessionId": "debug-session", "runId": "run1", "hypothesisId": "D", "location": "Stock Analyzer V15.py:main", "message": "Before MenuController", "data": {}, "timestamp": 1764021750855}
 {"sessionId": "debug-session", "runId": "run1", "hypothesisId": "D", "location": "Stock Analyzer V15.py:main", "message": "MenuController created", "data": {}, "timestamp": 1764021750857}
+{"sessionId": "debug-session", "runId": "run1", "hypothesisId": "A", "location": "Stock Analyzer V15.py:main", "message": "Function entry", "data": {"V15_ROOT": "C:\\Users\\edwar\\OneDrive\\Pictures\\Documents\\GitHub\\Stock\\Stock Report\\V15"}, "timestamp": 1764023220230}
+{"sessionId": "debug-session", "runId": "run1", "hypothesisId": "C", "location": "Stock Analyzer V15.py:main", "message": "Before initialize_structure", "data": {}, "timestamp": 1764023220232}
+{"sessionId": "debug-session", "runId": "run1", "hypothesisId": "C", "location": "Stock Analyzer V15.py:main", "message": "After initialize_structure", "data": {"success": true}, "timestamp": 1764023220245}
+{"sessionId": "debug-session", "runId": "run1", "hypothesisId": "B", "location": "Stock Analyzer V15.py:main", "message": "Before is_first_run", "data": {}, "timestamp": 1764023220245}
+{"sessionId": "debug-session", "runId": "run1", "hypothesisId": "B", "location": "Stock Analyzer V15.py:main", "message": "After is_first_run", "data": {"is_first_run": false}, "timestamp": 1764023220248}
+{"sessionId": "debug-session", "runId": "run1", "hypothesisId": "D", "location": "Stock Analyzer V15.py:main", "message": "Before MenuController", "data": {}, "timestamp": 1764023220249}
+{"sessionId": "debug-session", "runId": "run1", "hypothesisId": "D", "location": "Stock Analyzer V15.py:main", "message": "MenuController created", "data": {}, "timestamp": 1764023220250}
+{"sessionId": "debug-session", "runId": "run1", "hypothesisId": "A", "location": "Stock Analyzer V15.py:main", "message": "Function entry", "data": {"V15_ROOT": "C:\\Users\\edwar\\OneDrive\\Pictures\\Documents\\GitHub\\Stock\\Stock Report\\V15"}, "timestamp": 1764023397730}
+{"sessionId": "debug-session", "runId": "run1", "hypothesisId": "C", "location": "Stock Analyzer V15.py:main", "message": "Before initialize_structure", "data": {}, "timestamp": 1764023397732}
+{"sessionId": "debug-session", "runId": "run1", "hypothesisId": "C", "location": "Stock Analyzer V15.py:main", "message": "After initialize_structure", "data": {"success": true}, "timestamp": 1764023397737}
+{"sessionId": "debug-session", "runId": "run1", "hypothesisId": "B", "location": "Stock Analyzer V15.py:main", "message": "Before is_first_run", "data": {}, "timestamp": 1764023397737}
+{"sessionId": "debug-session", "runId": "run1", "hypothesisId": "B", "location": "Stock Analyzer V15.py:main", "message": "After is_first_run", "data": {"is_first_run": false}, "timestamp": 1764023397739}
+{"sessionId": "debug-session", "runId": "run1", "hypothesisId": "D", "location": "Stock Analyzer V15.py:main", "message": "Before MenuController", "data": {}, "timestamp": 1764023397739}
+{"sessionId": "debug-session", "runId": "run1", "hypothesisId": "D", "location": "Stock Analyzer V15.py:main", "message": "MenuController created", "data": {}, "timestamp": 1764023397741}
+{"sessionId": "debug-session", "runId": "run1", "hypothesisId": "E", "location": "Stock Analyzer V15.py:main", "message": "Fatal error", "data": {"error": "EOF when reading a line", "type": "EOFError"}, "timestamp": 1764023397745}

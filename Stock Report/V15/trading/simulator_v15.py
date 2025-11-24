@@ -8,8 +8,21 @@ import asyncio
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
-import pandas as pd
-import numpy as np
+
+# Handle pandas and numpy imports with error handling
+try:
+    import pandas as pd
+    PANDAS_AVAILABLE = True
+except ImportError:
+    PANDAS_AVAILABLE = False
+    pd = None
+
+try:
+    import numpy as np
+    NUMPY_AVAILABLE = True
+except ImportError:
+    NUMPY_AVAILABLE = False
+    np = None
 
 from ..core.data_fetcher import fetch_prices
 from ..core.portable_paths import get_path, get_history_path

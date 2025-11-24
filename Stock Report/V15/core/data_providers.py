@@ -5,11 +5,25 @@ Abstract interface for multiple data providers with fallback support.
 
 from abc import ABC, abstractmethod
 from typing import Optional, List, Dict, Any
-import pandas as pd
 import asyncio
-import aiohttp
 from pathlib import Path
 import json
+
+# Handle pandas import with error handling
+try:
+    import pandas as pd
+    PANDAS_AVAILABLE = True
+except ImportError:
+    PANDAS_AVAILABLE = False
+    pd = None
+
+# Handle aiohttp import with error handling
+try:
+    import aiohttp
+    AIOHTTP_AVAILABLE = True
+except ImportError:
+    AIOHTTP_AVAILABLE = False
+    aiohttp = None
 
 from .portable_paths import get_data_path
 

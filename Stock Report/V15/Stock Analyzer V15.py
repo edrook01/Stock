@@ -86,6 +86,38 @@ _agent_log(
 )
 # #endregion
 
+# Check for critical dependencies
+def check_dependencies():
+    """Check if critical dependencies are installed."""
+    missing_deps = []
+    
+    try:
+        import pandas
+    except ImportError:
+        missing_deps.append("pandas")
+    
+    try:
+        import numpy
+    except ImportError:
+        missing_deps.append("numpy")
+    
+    if missing_deps:
+        print("\n" + "=" * 70)
+        print("  MISSING DEPENDENCIES")
+        print("=" * 70)
+        print(f"\nThe following required modules are not installed: {', '.join(missing_deps)}")
+        print("\nTo install all required dependencies, run:")
+        print("  pip install -r requirements.txt")
+        print("\nOr install manually:")
+        for dep in missing_deps:
+            print(f"  pip install {dep}")
+        print("\n" + "=" * 70)
+        input("\nPress Enter to exit...")
+        sys.exit(1)
+
+# Check dependencies before importing V15 modules
+check_dependencies()
+
 # Import V15 modules with error handling
 try:
     from core.setup import initialize_v15, is_first_run

@@ -4,10 +4,23 @@ Implements Average True Range (ATR) calculation for dynamic risk management.
 """
 
 from typing import Optional
-import pandas as pd
-import numpy as np
 from pathlib import Path
 import json
+
+# Handle pandas and numpy imports with error handling
+try:
+    import pandas as pd
+    PANDAS_AVAILABLE = True
+except ImportError:
+    PANDAS_AVAILABLE = False
+    pd = None
+
+try:
+    import numpy as np
+    NUMPY_AVAILABLE = True
+except ImportError:
+    NUMPY_AVAILABLE = False
+    np = None
 
 from core.portable_paths import get_path
 

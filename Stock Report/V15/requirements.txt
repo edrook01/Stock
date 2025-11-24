@@ -1,0 +1,17 @@
+# Core dependencies for Stock Analyzer V15
+pandas>=1.3.0
+numpy>=1.20.0
+aiohttp>=3.8.0
+scikit-learn>=1.0.0
+xgboost>=1.5.0
+
+# UI dependencies (for Streamlit interface)
+streamlit>=1.20.0
+
+# Optional: Browser automation (choose one)
+# undetected-chromedriver>=3.4.0
+# playwright>=1.20.0
+
+# Optional: GPU acceleration (requires CUDA)
+# cupy>=10.0.0
+

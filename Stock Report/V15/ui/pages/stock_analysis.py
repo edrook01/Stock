@@ -4,12 +4,27 @@ Comprehensive stock analysis with predictions, charts, and technical indicators.
 """
 
 import streamlit as st
-import pandas as pd
-import numpy as np
 import asyncio
 import sys
 from pathlib import Path
 from datetime import datetime
+
+# Handle pandas and numpy imports with error handling
+try:
+    import pandas as pd
+    PANDAS_AVAILABLE = True
+except ImportError:
+    PANDAS_AVAILABLE = False
+    pd = None
+    st.error("⚠️ pandas is not installed. Please install it with: pip install pandas")
+
+try:
+    import numpy as np
+    NUMPY_AVAILABLE = True
+except ImportError:
+    NUMPY_AVAILABLE = False
+    np = None
+    st.error("⚠️ numpy is not installed. Please install it with: pip install numpy")
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 

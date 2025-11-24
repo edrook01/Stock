@@ -167,7 +167,8 @@ except Exception as e:
     def is_cfd_timeframe(*args): return False
     def is_investment_timeframe(*args): return False
     def is_valid_timeframe(*args): return False
-    class RiskProfile:
+    from enum import Enum
+    class RiskProfile(Enum):
         LOW = "low"
         MEDIUM = "medium"
         HIGH = "high"
@@ -328,7 +329,8 @@ class MenuController:
             print("\n" + "=" * 70)
             print("  STOCK ANALYZER V15 - MAIN MENU")
             print("=" * 70)
-            print(f"\nCurrent Risk Profile: {self.current_profile.value.upper()}")
+            profile_value = self.current_profile.value if hasattr(self.current_profile, 'value') else str(self.current_profile)
+            print(f"\nCurrent Risk Profile: {profile_value.upper()}")
             print("\n1. Core Analysis")
             print("2. Learning & Training")
             print("3. Data & Logs")
@@ -577,7 +579,8 @@ class MenuController:
             print("\n" + "=" * 50)
             print("RISK PROFILE SELECTION")
             print("=" * 50)
-            print("\nCurrent Profile: " + self.current_profile.value.upper())
+            profile_value = self.current_profile.value if hasattr(self.current_profile, 'value') else str(self.current_profile)
+            print("\nCurrent Profile: " + profile_value.upper())
             print("\nAvailable Profiles:")
             print("1. LOW    - 0.5-1% equity risk, stable assets only, tight stops")
             print("2. MEDIUM - 1% equity risk, moderate assets, balanced approach")

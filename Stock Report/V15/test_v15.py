@@ -11,9 +11,24 @@ from pathlib import Path
 from typing import Callable, List, Tuple
 from functools import wraps
 from unittest.mock import Mock, patch, AsyncMock, MagicMock
-import pandas as pd
-import numpy as np
 import sys
+
+# Handle pandas and numpy imports with error handling
+try:
+    import pandas as pd
+    PANDAS_AVAILABLE = True
+except ImportError:
+    PANDAS_AVAILABLE = False
+    pd = None
+    print("WARNING: pandas is not installed. Some tests may fail.")
+
+try:
+    import numpy as np
+    NUMPY_AVAILABLE = True
+except ImportError:
+    NUMPY_AVAILABLE = False
+    np = None
+    print("WARNING: numpy is not installed. Some tests may fail.")
 
 try:
     import pytest

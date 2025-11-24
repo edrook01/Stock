@@ -4,10 +4,18 @@ Overview of key metrics, recent activity, and quick insights.
 """
 
 import streamlit as st
-import pandas as pd
 from datetime import datetime, timedelta
 import sys
 from pathlib import Path
+
+# Handle pandas import with error handling
+try:
+    import pandas as pd
+    PANDAS_AVAILABLE = True
+except ImportError:
+    PANDAS_AVAILABLE = False
+    pd = None
+    st.error("⚠️ pandas is not installed. Please install it with: pip install pandas")
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 

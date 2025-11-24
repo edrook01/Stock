@@ -4,10 +4,23 @@ Debug utilities for risk management calculations.
 """
 
 from typing import Dict, List, Optional, Any, Tuple
-import pandas as pd
-import numpy as np
 from datetime import datetime
 import time
+
+# Handle pandas and numpy imports with error handling
+try:
+    import pandas as pd
+    PANDAS_AVAILABLE = True
+except ImportError:
+    PANDAS_AVAILABLE = False
+    pd = None
+
+try:
+    import numpy as np
+    NUMPY_AVAILABLE = True
+except ImportError:
+    NUMPY_AVAILABLE = False
+    np = None
 
 from ..risk.volatility import calculate_atr, calculate_atr_multiple_periods
 from ..risk.stop_loss import calculate_stop_loss_distance, calculate_stop_loss_price, should_skip_trade

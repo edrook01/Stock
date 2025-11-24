@@ -7,8 +7,21 @@ but with improved performance through vectorization and optional GPU acceleratio
 """
 
 from typing import Union
-import pandas as pd
-import numpy as np
+
+# Handle pandas and numpy imports with error handling
+try:
+    import pandas as pd
+    PANDAS_AVAILABLE = True
+except ImportError:
+    PANDAS_AVAILABLE = False
+    pd = None
+
+try:
+    import numpy as np
+    NUMPY_AVAILABLE = True
+except ImportError:
+    NUMPY_AVAILABLE = False
+    np = None
 
 # Try to import CuPy for GPU acceleration
 try:

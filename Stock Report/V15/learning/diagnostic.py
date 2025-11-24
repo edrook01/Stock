@@ -5,10 +5,17 @@ Analyzes failed trades to determine causes and generate reports.
 
 from typing import Dict, List, Optional
 from datetime import datetime
-import pandas as pd
 from pathlib import Path
 import sys
 import asyncio
+
+# Handle pandas import with error handling
+try:
+    import pandas as pd
+    PANDAS_AVAILABLE = True
+except ImportError:
+    PANDAS_AVAILABLE = False
+    pd = None
 
 from .failure_tracker import get_failure_tracker
 

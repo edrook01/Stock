@@ -4,8 +4,21 @@ Extracts features from V13 statistical/technical engines as input for unified ML
 """
 
 from typing import Dict, List, Optional, Any
-import pandas as pd
-import numpy as np
+
+# Handle pandas and numpy imports with error handling
+try:
+    import pandas as pd
+    PANDAS_AVAILABLE = True
+except ImportError:
+    PANDAS_AVAILABLE = False
+    pd = None
+
+try:
+    import numpy as np
+    NUMPY_AVAILABLE = True
+except ImportError:
+    NUMPY_AVAILABLE = False
+    np = None
 
 # Handle both relative and absolute imports for portability
 try:

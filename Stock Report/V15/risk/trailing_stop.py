@@ -5,7 +5,14 @@ Manages trailing stops that move with price to lock in profits.
 
 from typing import Optional, Dict
 from datetime import datetime
-import pandas as pd
+
+# Handle pandas import with error handling
+try:
+    import pandas as pd
+    PANDAS_AVAILABLE = True
+except ImportError:
+    PANDAS_AVAILABLE = False
+    pd = None
 
 from .volatility import calculate_atr
 

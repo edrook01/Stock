@@ -4,7 +4,14 @@ Calculates stop-loss distances using ATR multipliers based on risk profile and c
 """
 
 from typing import Optional, Tuple
-import pandas as pd
+
+# Handle pandas import with error handling
+try:
+    import pandas as pd
+    PANDAS_AVAILABLE = True
+except ImportError:
+    PANDAS_AVAILABLE = False
+    pd = None
 
 from .volatility import calculate_atr
 from .profiles import RiskProfile, get_atr_multiplier_range, get_profile_config

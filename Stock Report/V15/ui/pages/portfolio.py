@@ -4,12 +4,20 @@ Portfolio management and position tracking with exposure monitoring.
 """
 
 import streamlit as st
-import pandas as pd
 import asyncio
 import sys
 from pathlib import Path
 from datetime import datetime
 from typing import Optional
+
+# Handle pandas import with error handling
+try:
+    import pandas as pd
+    PANDAS_AVAILABLE = True
+except ImportError:
+    PANDAS_AVAILABLE = False
+    pd = None
+    st.error("⚠️ pandas is not installed. Please install it with: pip install pandas")
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
