@@ -5,8 +5,19 @@ Flags trades that exceed 2% drawdown threshold and detects execution errors.
 
 from typing import Dict, List, Optional
 from datetime import datetime
-from ..risk.equity_monitor import get_equity_monitor
+from pathlib import Path
+import sys
+
 from .trade_tracker import get_trade_tracker, TradeOutcome
+
+# Import with fallback for direct execution
+try:
+    from ..risk.equity_monitor import get_equity_monitor
+except (ImportError, ValueError):
+    # Fallback for direct execution or when relative imports fail
+    v14_root = Path(__file__).parent.parent
+    sys.path.insert(0, str(v14_root))
+    from risk.equity_monitor import get_equity_monitor
 
 
 class FailureTracker:

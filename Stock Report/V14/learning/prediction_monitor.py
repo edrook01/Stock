@@ -5,8 +5,19 @@ Monitors trades that exceed predicted timeframe without outcome.
 
 from typing import Dict, List, Optional
 from datetime import datetime, timedelta
-from ..core.timeframes import get_timeframe_delta, is_valid_timeframe
+from pathlib import Path
+import sys
+
 from .trade_tracker import get_trade_tracker
+
+# Import with fallback for direct execution
+try:
+    from ..core.timeframes import get_timeframe_delta, is_valid_timeframe
+except (ImportError, ValueError):
+    # Fallback for direct execution or when relative imports fail
+    v14_root = Path(__file__).parent.parent
+    sys.path.insert(0, str(v14_root))
+    from core.timeframes import get_timeframe_delta, is_valid_timeframe
 
 
 class PredictionMonitor:

@@ -40,7 +40,10 @@ class TradeLogger:
                 writer.writerow([
                     'DateTimeOpen', 'Ticker', 'Side', 'Size', 'EntryPrice',
                     'StopPrice', 'TargetPrice', 'DateTimeClose', 'ClosePrice',
-                    'P/L', 'Result', 'Confidence', 'Timeframe', 'Notes'
+                    'P/L', 'Result', 'Confidence', 'Timeframe', 
+                    'PredictionID', 'SentimentScore', 'RSI', 'MACD',
+                    'Volume', 'Volatility', 'SupportLevel', 'ResistanceLevel',
+                    'Indicators', 'MarketCondition', 'NewsCount', 'Notes'
                 ])
     
     def log_trade_entry(
@@ -53,6 +56,17 @@ class TradeLogger:
         target_price: Optional[float],
         confidence: float,
         timeframe: str,
+        prediction_id: Optional[str] = None,
+        sentiment_score: Optional[float] = None,
+        rsi: Optional[float] = None,
+        macd: Optional[Dict] = None,
+        volume: Optional[float] = None,
+        volatility: Optional[float] = None,
+        support_level: Optional[float] = None,
+        resistance_level: Optional[float] = None,
+        indicators: Optional[Dict] = None,
+        market_condition: Optional[str] = None,
+        news_count: Optional[int] = None,
         notes: str = ""
     ) -> str:
         """
@@ -67,6 +81,17 @@ class TradeLogger:
             target_price: Take-profit price (optional)
             confidence: Model confidence (0-1)
             timeframe: Prediction timeframe
+            prediction_id: Associated prediction ID (optional)
+            sentiment_score: Sentiment score at entry (optional)
+            rsi: RSI indicator value at entry (optional)
+            macd: MACD indicator values at entry (optional)
+            volume: Trading volume at entry (optional)
+            volatility: Volatility measure at entry (optional)
+            support_level: Support level (optional)
+            resistance_level: Resistance level (optional)
+            indicators: Dictionary of technical indicators (optional)
+            market_condition: Market condition at entry (optional)
+            news_count: Number of recent news items (optional)
             notes: Additional notes
             
         Returns:
@@ -86,6 +111,17 @@ class TradeLogger:
             "target_price": target_price,
             "confidence": confidence,
             "timeframe": timeframe,
+            "prediction_id": prediction_id,
+            "sentiment_score": sentiment_score,
+            "rsi": rsi,
+            "macd": macd,
+            "volume": volume,
+            "volatility": volatility,
+            "support_level": support_level,
+            "resistance_level": resistance_level,
+            "indicators": indicators or {},
+            "market_condition": market_condition,
+            "news_count": news_count,
             "notes": notes,
             "exit_time": None,
             "close_price": None,
@@ -195,8 +231,14 @@ class TradeLogger:
     def _append_csv_row(self, trade: Dict) -> None:
         """Append a trade row to CSV file."""
         try:
+            import json
             with open(self.csv_file, 'a', newline='', encoding='utf-8') as f:
                 writer = csv.writer(f)
+                
+                # Convert complex fields to JSON strings for CSV
+                macd_json = json.dumps(trade.get("macd", {})) if trade.get("macd") else ""
+                indicators_json = json.dumps(trade.get("indicators", {})) if trade.get("indicators") else ""
+                
                 writer.writerow([
                     trade.get("entry_time", ""),
                     trade.get("ticker", ""),
@@ -211,6 +253,17 @@ class TradeLogger:
                     trade.get("result", ""),
                     trade.get("confidence", ""),
                     trade.get("timeframe", ""),
+                    trade.get("prediction_id", ""),
+                    trade.get("sentiment_score", ""),
+                    trade.get("rsi", ""),
+                    macd_json,
+                    trade.get("volume", ""),
+                    trade.get("volatility", ""),
+                    trade.get("support_level", ""),
+                    trade.get("resistance_level", ""),
+                    indicators_json,
+                    trade.get("market_condition", ""),
+                    trade.get("news_count", ""),
                     trade.get("notes", "")
                 ])
         except Exception:

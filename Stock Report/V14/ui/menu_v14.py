@@ -65,6 +65,22 @@ class MenuController:
         self.running = True
         self.current_profile = RiskProfile.MEDIUM
         self.browser_automation = None
+        
+        # Load risk profile from config
+        try:
+            from ..core.portable_paths import get_data_path
+            import json
+            config_file = get_data_path() / 'config_v14.json'
+            if config_file.exists():
+                with open(config_file, 'r') as f:
+                    config = json.load(f)
+                profile_name = config.get("risk_profile", "medium")
+                profile = get_risk_profile(profile_name)
+                if profile:
+                    self.current_profile = profile
+        except Exception:
+            # Use default if config can't be loaded
+            pass
     
     def display_main_menu(self):
         """Display main menu."""
@@ -172,6 +188,7 @@ class MenuController:
         ticker = input("Enter ticker symbol: ").strip().upper()
         if not ticker:
             print("Invalid ticker.")
+            input("\nPress Enter to continue...")
             return
         
         timeframe = input("Enter timeframe (1m, 5m, 1h, 1d, etc.): ").strip().lower()
@@ -179,87 +196,323 @@ class MenuController:
             timeframe = "1d"
         
         print(f"\nGenerating prediction for {ticker} ({timeframe})...")
+        print("This may take a few moments...")
         
         try:
             model = get_model(timeframe)
             prediction = asyncio.run(model.predict(ticker))
             
-            print(f"\nPrediction: {prediction.get('prediction', 0):.2f}%")
-            print(f"Confidence: {prediction.get('confidence', 0):.2%}")
-            print(f"Range: {prediction.get('range_low', 0):.2f}% to {prediction.get('range_high', 0):.2f}%")
+            if not prediction:
+                print("\n⚠️  Could not generate prediction. Model may not be trained.")
+                print("Prediction will use default values until model is trained.")
+            else:
+                print(f"\n{'=' * 50}")
+                print(f"PREDICTION RESULTS")
+                print(f"{'=' * 50}")
+                print(f"Ticker: {ticker}")
+                print(f"Timeframe: {timeframe}")
+                print(f"\nPredicted Movement: {prediction.get('prediction', 0):.2f}%")
+                print(f"Confidence: {prediction.get('confidence', 0):.2%}")
+                print(f"Range: {prediction.get('range_low', 0):.2f}% to {prediction.get('range_high', 0):.2f}%")
+                if prediction.get('model_agreement'):
+                    print(f"Model Agreement: {prediction.get('model_agreement', 0):.2%}")
+                print(f"{'=' * 50}")
+                
+                if not model.is_trained:
+                    print("\n⚠️  Note: Model is not yet trained. Using default predictions.")
+                    print("Train the model with historical data for better accuracy.")
+        except ImportError as e:
+            print(f"\n❌ Error: Missing required dependency: {e}")
+            print("Please install required packages: pip install scikit-learn pandas numpy")
         except Exception as e:
-            print(f"Error: {e}")
+            print(f"\n❌ Error generating prediction: {e}")
+            import traceback
+            traceback.print_exc()
         
         input("\nPress Enter to continue...")
     
     def _select_risk_profile(self):
         """Select risk profile."""
-        print("\nRisk Profiles:")
-        print("1. Low (0.5-1% risk, stable assets)")
-        print("2. Medium (1% risk, moderate assets)")
-        print("3. High (1-2% risk, all assets)")
+        try:
+            print("\n" + "=" * 50)
+            print("RISK PROFILE SELECTION")
+            print("=" * 50)
+            print("\nCurrent Profile: " + self.current_profile.value.upper())
+            print("\nAvailable Profiles:")
+            print("1. LOW    - 0.5-1% equity risk, stable assets only, tight stops")
+            print("2. MEDIUM - 1% equity risk, moderate assets, balanced approach")
+            print("3. HIGH   - 1-2% equity risk, all assets, wider stops")
+            print("\n0. Cancel")
+            print("-" * 50)
+            
+            choice = input("\nSelect profile (1-3): ").strip()
+            
+            if choice == "0":
+                print("Cancelled.")
+            elif choice == "1":
+                self.current_profile = RiskProfile.LOW
+                # Save to config
+                try:
+                    from ..core.portable_paths import get_data_path
+                    import json
+                    config_file = get_data_path() / 'config_v14.json'
+                    if config_file.exists():
+                        with open(config_file, 'r') as f:
+                            config = json.load(f)
+                        config['risk_profile'] = 'low'
+                        with open(config_file, 'w') as f:
+                            json.dump(config, f, indent=2)
+                except Exception:
+                    pass
+                print(f"\n✅ Risk profile set to: LOW")
+            elif choice == "2":
+                self.current_profile = RiskProfile.MEDIUM
+                try:
+                    from ..core.portable_paths import get_data_path
+                    import json
+                    config_file = get_data_path() / 'config_v14.json'
+                    if config_file.exists():
+                        with open(config_file, 'r') as f:
+                            config = json.load(f)
+                        config['risk_profile'] = 'medium'
+                        with open(config_file, 'w') as f:
+                            json.dump(config, f, indent=2)
+                except Exception:
+                    pass
+                print(f"\n✅ Risk profile set to: MEDIUM")
+            elif choice == "3":
+                self.current_profile = RiskProfile.HIGH
+                try:
+                    from ..core.portable_paths import get_data_path
+                    import json
+                    config_file = get_data_path() / 'config_v14.json'
+                    if config_file.exists():
+                        with open(config_file, 'r') as f:
+                            config = json.load(f)
+                        config['risk_profile'] = 'high'
+                        with open(config_file, 'w') as f:
+                            json.dump(config, f, indent=2)
+                except Exception:
+                    pass
+                print(f"\n✅ Risk profile set to: HIGH")
+            else:
+                print("❌ Invalid choice.")
+        except Exception as e:
+            print(f"\n❌ Error: {e}")
+            import traceback
+            traceback.print_exc()
         
-        choice = input("Select profile (1-3): ").strip()
-        
-        if choice == "1":
-            self.current_profile = RiskProfile.LOW
-        elif choice == "2":
-            self.current_profile = RiskProfile.MEDIUM
-        elif choice == "3":
-            self.current_profile = RiskProfile.HIGH
-        else:
-            print("Invalid choice.")
-            return
-        
-        print(f"\nRisk profile set to: {self.current_profile.value.upper()}")
         input("\nPress Enter to continue...")
     
     def _browser_automation_status(self):
         """Display browser automation status."""
-        if self.browser_automation is None:
-            print("\nBrowser automation not initialized.")
-            init = input("Initialize browser automation? (y/n): ").strip().lower()
-            if init == 'y':
-                self.browser_automation = BrowserAutomation()
-                if self.browser_automation.initialize():
-                    print("✓ Browser automation initialized.")
-                else:
-                    print("✗ Failed to initialize browser automation.")
-        else:
-            print(f"\nBrowser automation: {self.browser_automation.library_used}")
-            print(f"Status: {'Ready' if self.browser_automation.is_ready() else 'Not ready'}")
+        try:
+            print("\n" + "=" * 50)
+            print("BROWSER AUTOMATION STATUS")
+            print("=" * 50)
+            
+            if self.browser_automation is None:
+                print("\nStatus: Not initialized")
+                print("\nBrowser automation allows automated Trading212 CFD trading.")
+                print("Requirements:")
+                print("  - Google Chrome installed")
+                print("  - undetected-chromedriver or playwright library")
+                print("  - Trading212 credentials in config_v14.json")
+                
+                init = input("\nInitialize browser automation? (y/n): ").strip().lower()
+                if init == 'y':
+                    print("\nInitializing browser automation...")
+                    try:
+                        self.browser_automation = BrowserAutomation()
+                        if self.browser_automation.initialize():
+                            print("✅ Browser automation initialized successfully!")
+                            print(f"   Library: {self.browser_automation.library_used}")
+                        else:
+                            print("❌ Failed to initialize browser automation.")
+                            print("   Please check:")
+                            print("   1. Chrome is installed")
+                            print("   2. Required library is installed (pip install undetected-chromedriver)")
+                            self.browser_automation = None
+                    except Exception as e:
+                        print(f"❌ Error initializing: {e}")
+                        self.browser_automation = None
+            else:
+                print(f"\nStatus: {'✅ Ready' if self.browser_automation.is_ready() else '❌ Not ready'}")
+                print(f"Library: {self.browser_automation.library_used}")
+                print(f"Initialized: {'Yes' if self.browser_automation.is_initialized else 'No'}")
+                
+                action = input("\nClose browser? (y/n): ").strip().lower()
+                if action == 'y':
+                    self.browser_automation.close()
+                    self.browser_automation = None
+                    print("✅ Browser closed")
+        except Exception as e:
+            print(f"\n❌ Error: {e}")
+            import traceback
+            traceback.print_exc()
         
         input("\nPress Enter to continue...")
     
     def _sentiment_override_settings(self):
         """Display sentiment override settings."""
-        override = get_sentiment_override()
-        status = override.get_override_status()
-        
-        print("\nSentiment Override Status:")
-        print(f"Protective Mode: {'Active' if status['protective_mode'] else 'Inactive'}")
-        print(f"Blocked Tickers: {len(status['blocked_tickers'])}")
-        print(f"Override Threshold: {status['override_threshold']}")
+        try:
+            override = get_sentiment_override()
+            status = override.get_override_status()
+            
+            print("\n" + "=" * 50)
+            print("SENTIMENT OVERRIDE SETTINGS")
+            print("=" * 50)
+            print(f"\nProtective Mode: {'🟢 Active' if status['protective_mode'] else '⚪ Inactive'}")
+            print(f"Blocked Tickers: {len(status['blocked_tickers'])}")
+            if status['blocked_tickers']:
+                print("\nCurrently Blocked:")
+                for ticker, until in status['blocked_tickers'].items():
+                    print(f"  - {ticker}: until {until}")
+            print(f"Override Threshold: {status['override_threshold']:.2f}")
+            
+            print("\nOptions:")
+            print("1. Toggle Protective Mode")
+            print("2. View Blocked Tickers")
+            print("3. Unblock Ticker")
+            print("0. Back")
+            
+            choice = input("\nEnter choice: ").strip()
+            
+            if choice == "1":
+                if status['protective_mode']:
+                    override.disable_protective_mode()
+                    print("✅ Protective mode disabled")
+                else:
+                    override.enable_protective_mode()
+                    print("✅ Protective mode enabled")
+            elif choice == "2":
+                if status['blocked_tickers']:
+                    print("\nBlocked Tickers:")
+                    for ticker, until in status['blocked_tickers'].items():
+                        print(f"  {ticker}: until {until}")
+                else:
+                    print("\nNo tickers currently blocked")
+            elif choice == "3":
+                ticker = input("Enter ticker to unblock: ").strip().upper()
+                if ticker in status['blocked_tickers']:
+                    # Note: This requires adding an unblock method to SentimentOverride
+                    print(f"⚠️  Unblocking not yet implemented. Ticker {ticker} will unblock automatically when block expires.")
+                else:
+                    print(f"Ticker {ticker} is not blocked")
+        except Exception as e:
+            print(f"\n❌ Error: {e}")
+            import traceback
+            traceback.print_exc()
         
         input("\nPress Enter to continue...")
     
     def _trade_log_analysis(self):
         """Display trade log analysis."""
-        logger = get_trade_logger()
-        trades = logger.get_trades()
-        
-        print(f"\nTotal Trades Logged: {len(trades)}")
-        completed = [t for t in trades if t.get("exit_time")]
-        print(f"Completed Trades: {len(completed)}")
-        print(f"Open Trades: {len(trades) - len(completed)}")
+        try:
+            from ..logging.analyzer import calculate_performance_metrics, compare_predicted_vs_actual, identify_patterns
+            
+            logger = get_trade_logger()
+            trades = logger.get_trades()
+            
+            print("\n" + "=" * 50)
+            print("TRADE LOG ANALYSIS")
+            print("=" * 50)
+            
+            if not trades:
+                print("\n⚠️  No trades logged yet.")
+                print("Trades will appear here once you start trading.")
+            else:
+                completed = [t for t in trades if t.get("exit_time")]
+                open_trades = [t for t in trades if not t.get("exit_time")]
+                
+                print(f"\nTotal Trades: {len(trades)}")
+                print(f"  ✅ Completed: {len(completed)}")
+                print(f"  ⏳ Open: {len(open_trades)}")
+                
+                if completed:
+                    metrics = calculate_performance_metrics(trades)
+                    comparison = compare_predicted_vs_actual(trades)
+                    patterns = identify_patterns(trades)
+                    
+                    print("\n" + "-" * 50)
+                    print("PERFORMANCE METRICS")
+                    print("-" * 50)
+                    print(f"Win Rate: {metrics['win_rate']:.2%}")
+                    print(f"Wins: {metrics['wins']}")
+                    print(f"Losses: {metrics['losses']}")
+                    print(f"Profit Factor: {metrics['profit_factor']:.2f}")
+                    print(f"Total P/L: ${metrics['total_pnl']:.2f}")
+                    print(f"Average P/L: ${metrics['avg_pnl']:.2f}")
+                    print(f"Max Drawdown: ${metrics['max_drawdown']:.2f}")
+                    
+                    print("\n" + "-" * 50)
+                    print("PREDICTION ACCURACY")
+                    print("-" * 50)
+                    print(f"Accuracy: {comparison['accuracy']:.2%}")
+                    print(f"Average Error: {comparison['avg_prediction_error']:.4f}")
+                    
+                    if patterns:
+                        print("\n" + "-" * 50)
+                        print("PATTERNS")
+                        print("-" * 50)
+                        print(f"High Confidence Win Rate: {patterns.get('high_confidence_win_rate', 0):.2%}")
+                        if patterns.get('timeframe_stats'):
+                            print("\nBy Timeframe:")
+                            for tf, stats in patterns['timeframe_stats'].items():
+                                total = stats['wins'] + stats['losses']
+                                wr = stats['wins'] / total if total > 0 else 0
+                                print(f"  {tf}: {stats['wins']}W / {stats['losses']}L ({wr:.2%})")
+                
+                # Show recent trades
+                print("\n" + "-" * 50)
+                print("RECENT TRADES (Last 5)")
+                print("-" * 50)
+                recent = sorted(trades, key=lambda t: t.get("entry_time", ""), reverse=True)[:5]
+                for trade in recent:
+                    status = "✅ Closed" if trade.get("exit_time") else "⏳ Open"
+                    pnl_str = f"${trade.get('pnl', 0):.2f}" if trade.get("pnl") is not None else "N/A"
+                    print(f"{status} | {trade.get('ticker', 'N/A')} | {trade.get('side', 'N/A')} | P/L: {pnl_str}")
+        except Exception as e:
+            print(f"\n❌ Error: {e}")
+            import traceback
+            traceback.print_exc()
         
         input("\nPress Enter to continue...")
     
     def _performance_report(self):
         """Display performance report."""
-        print("\nGenerating performance report...")
-        report = generate_performance_report()
-        print(report)
+        try:
+            print("\nGenerating performance report...")
+            print("This may take a moment...")
+            
+            # Ask if user wants to filter by ticker
+            ticker_filter = input("Filter by ticker? (Enter ticker symbol or press Enter for all): ").strip().upper()
+            ticker = ticker_filter if ticker_filter else None
+            
+            report = generate_performance_report(ticker=ticker)
+            
+            print("\n" + "=" * 70)
+            print(report)
+            print("=" * 70)
+            
+            # Option to export
+            export = input("\nExport report to file? (y/n): ").strip().lower()
+            if export == 'y':
+                try:
+                    from ..core.portable_paths import get_path
+                    from datetime import datetime
+                    history_dir = get_path('history')
+                    report_file = history_dir / f"performance_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+                    with open(report_file, 'w') as f:
+                        f.write(report)
+                    print(f"✅ Report saved to: {report_file}")
+                except Exception as e:
+                    print(f"❌ Error saving report: {e}")
+        except Exception as e:
+            print(f"\n❌ Error generating report: {e}")
+            import traceback
+            traceback.print_exc()
+        
         input("\nPress Enter to continue...")
     
     def _handle_analysis_menu(self):

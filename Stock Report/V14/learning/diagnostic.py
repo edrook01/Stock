@@ -6,11 +6,22 @@ Analyzes failed trades to determine causes and generate reports.
 from typing import Dict, List, Optional
 from datetime import datetime
 import pandas as pd
+from pathlib import Path
+import sys
+import asyncio
 
 from .failure_tracker import get_failure_tracker
-from ..risk.volatility import calculate_atr
-from ..core.data_fetcher import fetch_prices
-import asyncio
+
+# Import with fallback for direct execution
+try:
+    from ..risk.volatility import calculate_atr
+    from ..core.data_fetcher import fetch_prices
+except (ImportError, ValueError):
+    # Fallback for direct execution or when relative imports fail
+    v14_root = Path(__file__).parent.parent
+    sys.path.insert(0, str(v14_root))
+    from risk.volatility import calculate_atr
+    from core.data_fetcher import fetch_prices
 
 
 class TradeDiagnostic:

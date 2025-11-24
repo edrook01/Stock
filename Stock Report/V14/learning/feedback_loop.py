@@ -7,9 +7,18 @@ from typing import Dict, List, Optional
 from datetime import datetime
 import json
 from pathlib import Path
+import sys
 
 from .trade_tracker import get_trade_tracker, TradeOutcome
-from ..core.portable_paths import get_path
+
+# Import portable_paths with fallback for direct execution
+try:
+    from ..core.portable_paths import get_path
+except (ImportError, ValueError):
+    # Fallback for direct execution or when relative imports fail
+    v14_root = Path(__file__).parent.parent
+    sys.path.insert(0, str(v14_root))
+    from core.portable_paths import get_path
 
 
 class FeedbackLoop:

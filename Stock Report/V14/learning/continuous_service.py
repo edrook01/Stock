@@ -9,10 +9,22 @@ import asyncio
 from typing import Optional, Dict
 from datetime import datetime, timedelta
 import logging
+from pathlib import Path
+import sys
 
 from .model_updater import get_model_updater
-from ..model.trainer import get_model_trainer
-from ..core.portable_paths import get_data_path
+
+# Import with fallback for direct execution
+try:
+    from ..model.trainer import get_model_trainer
+    from ..core.portable_paths import get_data_path
+except (ImportError, ValueError):
+    # Fallback for direct execution or when relative imports fail
+    v14_root = Path(__file__).parent.parent
+    sys.path.insert(0, str(v14_root))
+    from model.trainer import get_model_trainer
+    from core.portable_paths import get_data_path
+
 import json
 
 logger = logging.getLogger(__name__)
