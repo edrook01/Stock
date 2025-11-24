@@ -207,5 +207,27 @@
     "pattern_notes": [
       "High confidence failure - reduce confidence for similar patterns"
     ]
+  },
+  {
+    "trade_id": "test1",
+    "timestamp": "2025-11-24T14:49:59.968949",
+    "prediction_error": null,
+    "prediction_correct": false,
+    "confidence_adjustment": -0.1,
+    "feature_weight_adjustments": {},
+    "pattern_notes": [
+      "High confidence failure - reduce confidence for similar patterns"
+    ]
+  },
+  {
+    "trade_id": "test1",
+    "timestamp": "2025-11-24T14:50:30.515434",
+    "prediction_error": null,
+    "prediction_correct": false,
+    "confidence_adjustment": -0.1,
+    "feature_weight_adjustments": {},
+    "pattern_notes": [
+      "High confidence failure - reduce confidence for similar patterns"
+    ]
   }
 ]

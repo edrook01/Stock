@@ -24,13 +24,29 @@ class PredictionEvaluator:
         self.storage = get_prediction_storage()
 
     def evaluate_prediction(self, prediction: PredictionRecord) -> Dict[str, Dict[str, float]]:
-        actual_price = prediction.actual_price
-        if actual_price is None:
-            actual_price = self._determine_actual_price(prediction.ticker, prediction.interval, prediction.predicted_price)
+        actual_prices = {
+            "close": prediction.actual_close if prediction.actual_close is not None else prediction.actual_price,
+            "high": prediction.actual_high,
+            "low": prediction.actual_low,
+        }
+        if actual_prices["close"] is None:
+            actual_prices = self._fetch_actual_prices(
+                prediction.ticker,
+                prediction.interval,
+                prediction.predicted_price,
+            )
 
-        accuracy = self._calculate_accuracy(prediction, actual_price)
-        prediction.actual_price = actual_price
+        accuracy = self._calculate_accuracy(prediction, actual_prices)
+        prediction.actual_price = actual_prices.get("close")
+        prediction.actual_close = actual_prices.get("close")
+        prediction.actual_high = actual_prices.get("high")
+        prediction.actual_low = actual_prices.get("low")
         prediction.accuracy_score = accuracy["accuracy_scores"]["overall_accuracy"]
+        prediction.accuracy_breakdown = {
+            key: value
+            for key, value in accuracy["accuracy_scores"].items()
+            if key.endswith("_pct")
+        }
         prediction.confidence_calibration = accuracy["confidence_calibration"]
         prediction.evaluation_status = "evaluated"
         prediction.updated_at = datetime.utcnow()
@@ -45,9 +61,16 @@ class PredictionEvaluator:
             results.append(prediction)
         return results
 
-    def _determine_actual_price(self, ticker: str, interval: str, fallback_price: float) -> float:
+    def _fetch_actual_prices(self, ticker: str, interval: str, fallback_price: float) -> Dict[str, float]:
+        default = {
+            "close": fallback_price,
+            "high": fallback_price,
+            "low": fallback_price,
+        }
+
         if fetch_prices is None:
-            return fallback_price
+            return default
+
         try:
             loop = asyncio.new_event_loop()
             try:
@@ -56,30 +79,59 @@ class PredictionEvaluator:
             finally:
                 loop.close()
             if df is not None and len(df) > 0:
-                return float(df["Close"].iloc[-1])
+                last_row = df.iloc[-1]
+                close_price = float(last_row.get("Close", fallback_price))
+                high_price = float(last_row.get("High", close_price))
+                low_price = float(last_row.get("Low", close_price))
+                return {"close": close_price, "high": high_price, "low": low_price}
         except Exception:
             pass
-        # Fallback: small random drift around predicted price
+
+        # Fallback: small random drift around predicted price to avoid repeated ties
         rng = random.Random(f"{ticker}_{interval}")
-        return max(0.01, fallback_price + rng.uniform(-1.5, 1.5))
+        noisy_price = max(0.01, fallback_price + rng.uniform(-1.5, 1.5))
+        return {"close": noisy_price, "high": noisy_price, "low": noisy_price}
 
     @staticmethod
-    def _calculate_accuracy(prediction: PredictionRecord, actual_price: float) -> Dict[str, Dict[str, float]]:
-        within_range = prediction.predicted_range_low <= actual_price <= prediction.predicted_range_high
-        range_width = max(prediction.predicted_range_high - prediction.predicted_range_low, 0.01)
-        distance = abs(actual_price - prediction.predicted_price)
-        range_penalty = min(distance / range_width, 2.0)
-        overall_score = round(max(0.0, 10.0 - range_penalty * 5.0), 2)
-        confidence_error = abs(prediction.confidence - min(1.0, prediction.predicted_price / max(actual_price, 0.01)))
+    def _calculate_accuracy(prediction: PredictionRecord, actual_prices: Dict[str, float]) -> Dict[str, Dict[str, float]]:
+        actual_close = actual_prices.get("close", prediction.predicted_price)
+        actual_high = actual_prices.get("high", actual_close)
+        actual_low = actual_prices.get("low", actual_close)
+
+        within_range = (
+            prediction.predicted_range_low <= actual_close <= prediction.predicted_range_high
+        )
+
+        close_pct = PredictionEvaluator._accuracy_pct(prediction.predicted_price, actual_close)
+        high_pct = PredictionEvaluator._accuracy_pct(prediction.predicted_range_high, actual_high)
+        low_pct = PredictionEvaluator._accuracy_pct(prediction.predicted_range_low, actual_low)
+
+        overall_pct = round((close_pct + high_pct + low_pct) / 3.0, 2)
+        overall_score = round(overall_pct / 10.0, 2)  # Preserve legacy 0-10 scale
+
+        confidence_error = abs(prediction.confidence - min(1.0, overall_pct / 100.0))
         confidence_calibration = round(max(0.0, 1.0 - confidence_error), 3)
+
         return {
             "accuracy_scores": {
                 "within_range": 1.0 if within_range else 0.0,
+                "close_accuracy_pct": close_pct,
+                "high_accuracy_pct": high_pct,
+                "low_accuracy_pct": low_pct,
+                "overall_accuracy_pct": overall_pct,
                 "overall_accuracy": overall_score,
             },
             "confidence_calibration": confidence_calibration,
-            "actual_price": actual_price,
+            "actual_price": actual_close,
         }
+
+    @staticmethod
+    def _accuracy_pct(predicted: Optional[float], actual: Optional[float]) -> float:
+        if predicted is None or actual is None:
+            return 0.0
+        denominator = max(abs(actual), 1e-6)
+        pct = max(0.0, 1.0 - abs(predicted - actual) / denominator)
+        return round(pct * 100.0, 2)
 
 
 _PREDICTION_EVALUATOR: Optional[PredictionEvaluator] = None

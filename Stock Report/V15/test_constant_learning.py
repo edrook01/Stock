@@ -44,6 +44,7 @@ sys.modules['V15.learning'] = learning_pkg
 
 # Import core modules first (they don't have relative import issues)
 from core.portable_paths import get_path, initialize_structure
+from core.ticker_universe import get_trading212_tickers
 from core.timeframes import CONSTANT_LEARNING_INTERVALS
 
 # For learning modules, import normally - relative imports should work now
@@ -279,8 +280,26 @@ def test_prediction_evaluator():
             # #endregion
             
             if result:
+                accuracy_scores = result.get("accuracy_scores", {}) or {}
                 print("[OK] Prediction evaluated successfully")
-                print(f"   Accuracy: {result.get('accuracy_scores', {}).get('overall_accuracy', 'N/A')}")
+                print(f"   Overall Accuracy: {accuracy_scores.get('overall_accuracy', 'N/A')}")
+
+                required_scores = {
+                    "close_accuracy_pct",
+                    "high_accuracy_pct",
+                    "low_accuracy_pct",
+                    "overall_accuracy_pct",
+                }
+                missing_scores = [score for score in required_scores if score not in accuracy_scores]
+                if missing_scores:
+                    print(f"[FAIL] Missing accuracy metrics: {', '.join(missing_scores)}")
+                    return False
+
+                print(
+                    f"   Breakdown -> Close: {accuracy_scores['close_accuracy_pct']}%, "
+                    f"High: {accuracy_scores['high_accuracy_pct']}%, "
+                    f"Low: {accuracy_scores['low_accuracy_pct']}%"
+                )
             else:
                 print("[WARN]  Evaluation returned None (may be due to data fetching issues)")
         
@@ -329,6 +348,22 @@ def test_constant_learning_engine():
         print(f"   Running: {status['running']}")
         print(f"   Active Intervals: {status['active_intervals']}")
         print(f"   Active Tickers: {status['active_tickers_count']}")
+
+        expected_tickers = get_trading212_tickers()
+        if list(getattr(engine, "active_tickers", [])) != expected_tickers:
+            print("[FAIL] Active ticker list does not match Trading212 universe")
+            print(f"   Expected: {len(expected_tickers)} tickers, Found: {status['active_tickers_count']}")
+            return False
+        else:
+            print("[OK] Active tickers cover the full Trading212 universe")
+
+        required_intervals = {"1m", "5m", "10m", "15m", "1h", "1d", "1mo", "3mo", "1y"}
+        missing_required = required_intervals.difference(CONSTANT_LEARNING_INTERVALS)
+        if missing_required:
+            print(f"[FAIL] CONSTANT_LEARNING_INTERVALS missing: {', '.join(sorted(missing_required))}")
+            return False
+        else:
+            print("[OK] Contract intervals available for constant learning")
         
         # Test configuration
         engine.set_enabled(False)  # Don't actually start it

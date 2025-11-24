@@ -13,12 +13,14 @@ from pathlib import Path
 # Import V15 modules
 try:
     from ..core.portable_paths import get_path
+    from ..core.ticker_universe import get_trading212_tickers
     from ..core.prediction_scheduler import get_prediction_scheduler
     from ..core.data_fetcher import fetch_prices
     from ..core.timeframes import (
         ALL_TIMEFRAMES,
         CFD_TIMEFRAMES,
         INVESTMENT_TIMEFRAMES,
+        CONSTANT_LEARNING_INTERVALS,
         is_cfd_timeframe,
         is_investment_timeframe,
         is_valid_timeframe,
@@ -37,6 +39,7 @@ try:
     from ..sentiment.override import get_sentiment_override
     from ..sa_logging.trade_logger import get_trade_logger
     from ..sa_logging.analyzer import generate_performance_report
+    from ..learning.prediction_generator import get_prediction_generator
     # Import error logger
     try:
         from ..sa_logging.error_logger import log_exception, log_error, log_warning, log_info
@@ -51,12 +54,14 @@ except ImportError:
     v15_root = Path(__file__).parent.parent
     sys.path.insert(0, str(v15_root))
     from core.portable_paths import get_path
+    from core.ticker_universe import get_trading212_tickers
     from core.prediction_scheduler import get_prediction_scheduler
     from core.data_fetcher import fetch_prices
     from core.timeframes import (
         ALL_TIMEFRAMES,
         CFD_TIMEFRAMES,
         INVESTMENT_TIMEFRAMES,
+        CONSTANT_LEARNING_INTERVALS,
         is_cfd_timeframe,
         is_investment_timeframe,
         is_valid_timeframe,
@@ -73,6 +78,7 @@ except ImportError:
     from risk.equity_monitor import get_equity_monitor
     from browser.automation import BrowserAutomation
     from sentiment.override import get_sentiment_override
+    from learning.prediction_generator import get_prediction_generator
     # Import local logging modules using importlib for standalone execution
     import importlib.util
     import sys as sys_module
@@ -151,6 +157,7 @@ class MenuController:
         self.running = True
         self.current_profile = RiskProfile.MEDIUM
         self.browser_automation = None
+        self._prediction_generator = None
         
         # Load risk profile from config
         try:
@@ -167,6 +174,71 @@ class MenuController:
         except Exception:
             # Use default if config can't be loaded
             pass
+
+    @property
+    def prediction_generator(self):
+        if self._prediction_generator is None:
+            try:
+                self._prediction_generator = get_prediction_generator()
+            except Exception as gen_error:
+                try:
+                    log_warning(
+                        "Prediction generator unavailable",
+                        component="menu",
+                        function="prediction_generator",
+                        context={"error": str(gen_error)},
+                    )
+                except Exception:
+                    pass
+                self._prediction_generator = None
+        return self._prediction_generator
+
+    def _get_active_tickers(self) -> List[str]:
+        try:
+            from ..learning.constant_learning_engine import get_constant_learning_engine
+        except (ImportError, ValueError):
+            from learning.constant_learning_engine import get_constant_learning_engine
+        try:
+            engine = get_constant_learning_engine()
+            if getattr(engine, "active_tickers", None):
+                return list(engine.active_tickers)
+        except Exception:
+            pass
+        try:
+            return get_trading212_tickers()
+        except Exception:
+            return ["AAPL", "MSFT", "TSLA"]
+
+    def _get_watch_intervals(self) -> List[str]:
+        try:
+            return list(CONSTANT_LEARNING_INTERVALS)
+        except Exception:
+            return ["1m", "5m", "10m", "15m", "1h", "1d", "1mo", "3mo", "1y"]
+
+    def _seed_prediction_feed(self, storage, per_interval: int = 1) -> int:
+        generator = self.prediction_generator
+        if generator is None:
+            return 0
+        try:
+            created = generator.ensure_predictions(
+                tickers=self._get_active_tickers(),
+                intervals=self._get_watch_intervals(),
+                per_interval=max(1, per_interval),
+            )
+            if created:
+                print(f"\n🧠 Generated {created} new predictions to seed the live feed.")
+            return created
+        except Exception as seed_error:
+            try:
+                log_warning(
+                    "Failed to seed prediction feed",
+                    component="menu",
+                    function="_seed_prediction_feed",
+                    context={"error": str(seed_error)},
+                )
+            except Exception:
+                pass
+            return 0
     
     def display_main_menu(self):
         """Display main menu."""
@@ -393,6 +465,13 @@ class MenuController:
                 if not model.is_trained:
                     print("\n⚠️  Note: Model is not yet trained. Using default predictions.")
                     print("Train the model with historical data for better accuracy.")
+                try:
+                    generator = self.prediction_generator
+                    if generator:
+                        if generator.record_external_prediction(ticker, timeframe, prediction, source="manual_analysis"):
+                            print("\n📡 Prediction stored for live monitoring and evaluation.")
+                except Exception:
+                    pass
         except ImportError as e:
             print(f"\n❌ Error: Missing required dependency: {e}")
             print("Please install required packages: pip install scikit-learn pandas numpy")
@@ -1382,7 +1461,15 @@ Please check logs/error.log for details.
                 if action == 'y':
                     if service.start():
                         print("✅ Continuous training started")
-                        self._stream_interval_predictions(get_prediction_storage())
+                        try:
+                            storage = get_prediction_storage()
+                        except Exception:
+                            storage = None
+                        if storage:
+                            self._seed_prediction_feed(storage, per_interval=1)
+                        else:
+                            storage = get_prediction_storage()
+                        self._stream_interval_predictions(storage)
                         skip_pause = True
                     else:
                         print("❌ Failed to start continuous training")
@@ -1496,10 +1583,15 @@ Please check logs/error.log for details.
     def _stream_interval_predictions(self, storage, refresh_seconds: float = 3.0) -> None:
         """Continuously display interval predictions while learning runs."""
         print("\nStreaming interval predictions. Press Ctrl+C to stop.\n")
+        self._seed_prediction_feed(storage, per_interval=1)
         try:
             while True:
                 self._clear_console()
                 predictions = storage.get_predictions()
+                if not predictions:
+                    created = self._seed_prediction_feed(storage, per_interval=1)
+                    if created:
+                        predictions = storage.get_predictions()
                 print("ACTIVE INTERVAL PREDICTIONS")
                 print("=" * 80)
                 if not predictions:
@@ -1531,6 +1623,7 @@ Please check logs/error.log for details.
                             f"{record.ticker[:8]:<8} {record.interval[:8]:<8} {target:>10} {low:>10} "
                             f"{high:>10} {confidence:>12} {accuracy:>10} {status:>10}"
                         )
+                self._seed_prediction_feed(storage, per_interval=1)
                 print("\n(Streaming... Press Ctrl+C to return to the menu.)")
                 time.sleep(max(1.0, refresh_seconds))
         except KeyboardInterrupt:

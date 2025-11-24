@@ -24,6 +24,7 @@ These three capabilities are locked interfaces. Treat them as living contracts: 
 - Continuously produces fresh predictions for every supported interval (1m, 5m, 10m, 15m, 1h, 1d, 1mo, 3mo, 1y) and automatically back-fills any interval whose prior prediction has elapsed.
 - Every prediction includes the contract data fields: interval target price/high/low, elapsed high/low/close when available, current confidence rating, plus three post-interval accuracy ratings.
 - Evaluates elapsed predictions automatically, refills each interval with a new prediction, and records the evaluation results for downstream analytics.
+- Treat the ticker universe as the full Trading212 listed market (see `data/tickers.txt`) so the constant learner continuously covers every available instrument, not just a hand-picked subset.
 - Improves accuracy incrementally: reuse prior weights, validate incoming samples, and avoid full retrains unless the owner says otherwise.
 
 Failure to comply with this document breaks the core API and is not allowed without written approval. Keep this file synced with any future `core_contracts.md` references and treat both as source-of-truth guardrails.

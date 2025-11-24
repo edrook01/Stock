@@ -11,6 +11,14 @@ from learning.prediction_storage import get_prediction_storage
 from learning.prediction_evaluator import get_prediction_evaluator
 from learning.interval_learners import get_interval_learner_manager
 from learning.parameter_optimizer import get_parameter_optimizer
+from learning.prediction_generator import get_prediction_generator
+
+try:
+    from core.timeframes import CONSTANT_LEARNING_INTERVALS
+    from core.ticker_universe import get_trading212_tickers
+except Exception:
+    CONSTANT_LEARNING_INTERVALS = ["1m", "5m", "10m", "15m", "1h", "4h", "1d", "1w", "1mo", "3mo", "1y"]
+    from core.ticker_universe import get_trading212_tickers  # type: ignore
 
 
 class ConstantLearningEngine:
@@ -20,14 +28,15 @@ class ConstantLearningEngine:
         self.enabled = enabled
         self.evaluation_frequency_seconds = evaluation_frequency_seconds
         self.max_predictions_per_cycle = 10
-        self.active_intervals: List[str] = ["1m", "5m", "1h", "4h", "1d", "1w", "1mo"]
-        self.active_tickers: List[str] = ["AAPL", "MSFT", "TSLA"]
+        self.active_intervals: List[str] = list(CONSTANT_LEARNING_INTERVALS)
+        self.active_tickers: List[str] = get_trading212_tickers()
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
         self.storage = get_prediction_storage()
         self.evaluator = get_prediction_evaluator()
         self.learner_manager = get_interval_learner_manager()
         self.optimizer = get_parameter_optimizer()
+        self.prediction_generator = get_prediction_generator()
 
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
@@ -58,6 +67,10 @@ class ConstantLearningEngine:
     def set_active_tickers(self, tickers: Sequence[str]) -> None:
         self.active_tickers = list(tickers)
 
+    def refresh_active_tickers(self) -> None:
+        """Reload the Trading212 ticker universe into the active list."""
+        self.active_tickers = get_trading212_tickers()
+
     def set_trade_outcome_weight(self, weight: float) -> None:
         self.optimizer.set_trade_outcome_weight(weight)
 
@@ -78,6 +91,14 @@ class ConstantLearningEngine:
             for prediction in expired[: self.max_predictions_per_cycle]:
                 result = self.evaluator.evaluate_prediction(prediction)
                 self.learner_manager.record_evaluation(prediction, result)
+                try:
+                    self.prediction_generator.ensure_predictions(
+                        tickers=[prediction.ticker],
+                        intervals=[prediction.interval],
+                        per_interval=1,
+                    )
+                except Exception:
+                    pass
 
     def get_status(self) -> dict:
         return {

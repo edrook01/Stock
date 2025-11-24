@@ -95,3 +95,10 @@
 {"sessionId": "debug-session", "runId": "run1", "hypothesisId": "B", "location": "Stock Analyzer V15.py:main", "message": "After is_first_run", "data": {"is_first_run": false}, "timestamp": 1763995474763}
 {"sessionId": "debug-session", "runId": "run1", "hypothesisId": "D", "location": "Stock Analyzer V15.py:main", "message": "Before MenuController", "data": {}, "timestamp": 1763995474764}
 {"sessionId": "debug-session", "runId": "run1", "hypothesisId": "D", "location": "Stock Analyzer V15.py:main", "message": "MenuController created", "data": {}, "timestamp": 1763995474764}
+{"sessionId": "debug-session", "runId": "run1", "hypothesisId": "A", "location": "Stock Analyzer V15.py:main", "message": "Function entry", "data": {"V15_ROOT": "C:\\Users\\edwar\\Documents\\GitHub\\Stock\\Stock Report\\V15"}, "timestamp": 1763996262864}
+{"sessionId": "debug-session", "runId": "run1", "hypothesisId": "C", "location": "Stock Analyzer V15.py:main", "message": "Before initialize_structure", "data": {}, "timestamp": 1763996262864}
+{"sessionId": "debug-session", "runId": "run1", "hypothesisId": "C", "location": "Stock Analyzer V15.py:main", "message": "After initialize_structure", "data": {"success": true}, "timestamp": 1763996262868}
+{"sessionId": "debug-session", "runId": "run1", "hypothesisId": "B", "location": "Stock Analyzer V15.py:main", "message": "Before is_first_run", "data": {}, "timestamp": 1763996262868}
+{"sessionId": "debug-session", "runId": "run1", "hypothesisId": "B", "location": "Stock Analyzer V15.py:main", "message": "After is_first_run", "data": {"is_first_run": false}, "timestamp": 1763996262868}
+{"sessionId": "debug-session", "runId": "run1", "hypothesisId": "D", "location": "Stock Analyzer V15.py:main", "message": "Before MenuController", "data": {}, "timestamp": 1763996262868}
+{"sessionId": "debug-session", "runId": "run1", "hypothesisId": "D", "location": "Stock Analyzer V15.py:main", "message": "MenuController created", "data": {}, "timestamp": 1763996262869}

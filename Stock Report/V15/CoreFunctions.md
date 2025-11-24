@@ -20,6 +20,7 @@ These three capabilities are *locked contracts/APIs*. Do not refactor or replace
 - Must continuously generate predictions for 1m, 5m, 10m, 15m, 1h, 1d, 1mo, 3mo, and 1y timeframes.
 - Must track elapsed predictions, record actual high/low/close outcomes, and automatically refill each interval once it elapses.
 - Must output a confidence score plus three accuracy ratings (high/low/close) after each interval completes.
+- Must draw its ticker universe from the entire Trading212 market listing stored in `data/tickers.txt`, ensuring every listed instrument receives active coverage.
 - Must preserve previous weights, validate any new samples, and avoid full retrains; learning is strictly incremental.
 - Must only update models once Autonomous Trading and Manual Analysis artifacts have been archived for that interval.
 

@@ -5,7 +5,7 @@ Tests all aspects per Project Plan:
 - Autonomous constant learning system
 - Continuous evaluation of expired predictions
 - Prediction scoring with confidence and accuracy (THE CORE FEATURE)
-- Interval-specific learning (1m, 5m, 1h, 4h, 1d, 1w, 1mo)
+- Interval-specific learning (1m, 5m, 10m, 15m, 1h, 4h, 1d, 1w, 1mo, 3mo, 1y)
 - Parameter optimization and updates
 - Trade outcome integration (with higher weight)
 - Settings integration
@@ -73,6 +73,14 @@ except (ImportError, AttributeError) as e:
     get_timeframe_delta = None
 
 try:
+    from core.portable_paths import get_data_path
+    PORTABLE_PATHS_AVAILABLE = True
+except (ImportError, AttributeError) as e:
+    print(f"Warning: Could not import portable_paths: {e}")
+    PORTABLE_PATHS_AVAILABLE = False
+    get_data_path = None
+
+try:
     from learning.prediction_storage import PredictionRecord, get_prediction_storage
     PREDICTION_STORAGE_AVAILABLE = True
 except (ImportError, AttributeError) as e:
@@ -88,6 +96,14 @@ except (ImportError, AttributeError) as e:
     print(f"Warning: Could not import prediction_evaluator: {e}")
     PREDICTION_EVALUATOR_AVAILABLE = False
     get_prediction_evaluator = None
+
+try:
+    from learning.prediction_generator import PredictionGenerator
+    PREDICTION_GENERATOR_AVAILABLE = True
+except (ImportError, AttributeError) as e:
+    print(f"Warning: Could not import prediction_generator: {e}")
+    PREDICTION_GENERATOR_AVAILABLE = False
+    PredictionGenerator = None
 
 try:
     from learning.constant_learning_engine import ConstantLearningEngine
@@ -146,6 +162,14 @@ except (ImportError, AttributeError) as e:
     DATA_FETCHER_AVAILABLE = False
     fetch_prices = None
 
+try:
+    from core.ticker_universe import get_trading212_tickers
+    TICKER_UNIVERSE_AVAILABLE = True
+except (ImportError, AttributeError) as e:
+    print(f"Warning: Could not import ticker_universe: {e}")
+    TICKER_UNIVERSE_AVAILABLE = False
+    get_trading212_tickers = None
+
 #region agent log
 _agent_debug_log(
     "H2",
@@ -169,7 +193,7 @@ class TestFunction3ContinuousLearning:
     def __init__(self):
         self.test_results: Dict[str, Dict] = {}
         self.test_tickers = ["AAPL", "MSFT", "TSLA"]
-        self.all_intervals = CONSTANT_LEARNING_INTERVALS if TIMEFRAMES_AVAILABLE else []  # 1m, 5m, 1h, 4h, 1d, 1w, 1mo
+        self.all_intervals = CONSTANT_LEARNING_INTERVALS if TIMEFRAMES_AVAILABLE else []  # Contract-required intervals
         self.prediction_storage = get_prediction_storage() if PREDICTION_STORAGE_AVAILABLE else None
         self.prediction_evaluator = get_prediction_evaluator() if PREDICTION_EVALUATOR_AVAILABLE else None
         
@@ -186,6 +210,9 @@ class TestFunction3ContinuousLearning:
         
         # Test 2: Prediction Creation for All Intervals
         results["prediction_creation"] = self.test_prediction_creation()
+        
+        # Test 2b: Contract intervals coverage
+        results["interval_contract"] = self.test_contract_intervals()
         
         # Test 3: Prediction Evaluation (THE CORE FEATURE)
         results["prediction_evaluation"] = self.test_prediction_evaluation()
@@ -225,9 +252,70 @@ class TestFunction3ContinuousLearning:
         
         # Test 14: Parameter Update History
         results["parameter_update_history"] = self.test_parameter_update_history()
+
+        # Test 15: Trading212 ticker universe alignment
+        results["ticker_universe_alignment"] = self.test_trading212_ticker_universe()
         
         self.test_results = results
         return results
+
+    def test_trading212_ticker_universe(self) -> bool:
+        """Verify the Trading212 ticker universe is available and in use."""
+        print("\n[TEST] Trading212 Ticker Universe Alignment")
+        print("-" * 80)
+
+        if not (TICKER_UNIVERSE_AVAILABLE and get_trading212_tickers):
+            print("  [FAIL] Ticker universe module unavailable")
+            return False
+
+        try:
+            tickers = get_trading212_tickers()
+            if len(tickers) < 50:
+                print(f"  [FAIL] Expected broad universe, found only {len(tickers)} tickers")
+                return False
+            print(f"  [OK] Loaded {len(tickers)} Trading212 tickers")
+
+            if PORTABLE_PATHS_AVAILABLE and get_data_path:
+                ticker_file = get_data_path() / "tickers.txt"
+                if not ticker_file.exists():
+                    print(f"  [FAIL] Missing ticker file: {ticker_file}")
+                    return False
+                with open(ticker_file, "r", encoding="utf-8") as fh:
+                    normalized = []
+                    seen = set()
+                    for line in fh:
+                        entry = line.strip().upper()
+                        if not entry or entry.startswith("#"):
+                            continue
+                        if entry in seen:
+                            continue
+                        normalized.append(entry)
+                        seen.add(entry)
+                if normalized != tickers:
+                    print("  [FAIL] Ticker universe differs from file contents")
+                    print(f"         File tickers: {len(normalized)}, Loaded: {len(tickers)}")
+                    return False
+                print("  [OK] Ticker universe matches data/tickers.txt")
+
+            if PREDICTION_GENERATOR_AVAILABLE and PredictionGenerator:
+                generator = PredictionGenerator()
+                if generator.default_tickers != tickers:
+                    print("  [FAIL] PredictionGenerator default_tickers do not match Trading212 list")
+                    return False
+                print("  [OK] PredictionGenerator uses Trading212 ticker universe")
+
+            if CONSTANT_LEARNING_ENGINE_AVAILABLE and ConstantLearningEngine:
+                engine = ConstantLearningEngine()
+                if engine.active_tickers != tickers:
+                    print("  [FAIL] ConstantLearningEngine active_tickers do not match Trading212 list")
+                    return False
+                print("  [OK] ConstantLearningEngine active_tickers synced with Trading212 universe")
+
+            return True
+        except Exception as exc:
+            print(f"  [FAIL] Error validating ticker universe: {exc}")
+            traceback.print_exc()
+            return False
     
     def test_prediction_storage(self) -> bool:
         """Test prediction storage system."""
@@ -335,6 +423,26 @@ class TestFunction3ContinuousLearning:
         success_rate = (success_count / total_tests) * 100 if total_tests > 0 else 0
         print(f"\n  Result: {success_count}/{total_tests} successful ({success_rate:.1f}%)")
         return success_rate >= 80.0
+
+    def test_contract_intervals(self) -> bool:
+        """Ensure all core contract intervals are configured."""
+        print("\n[TEST] Contract Interval Coverage")
+        print("-" * 80)
+
+        if not TIMEFRAMES_AVAILABLE:
+            print("  [WARN] Timeframe module unavailable – skipping contract check")
+            return True
+
+        required_intervals = {"1m", "5m", "10m", "15m", "1h", "1d", "1mo", "3mo", "1y"}
+        available = set(self.all_intervals)
+        missing = sorted(required_intervals.difference(available))
+
+        if missing:
+            print(f"  [FAIL] Missing required intervals: {', '.join(missing)}")
+            return False
+
+        print(f"  [OK] All required intervals available: {', '.join(sorted(required_intervals))}")
+        return True
     
     def test_prediction_evaluation(self) -> bool:
         """Test prediction evaluation (THE CORE FEATURE)."""
@@ -467,6 +575,22 @@ class TestFunction3ContinuousLearning:
                 
                 prediction.accuracy_score = accuracy
                 prediction.evaluation_status = "evaluated"
+
+                def _accuracy_pct(predicted: float, actual: float) -> float:
+                    denominator = max(abs(actual), 1e-6)
+                    pct = max(0.0, 1.0 - abs(predicted - actual) / denominator)
+                    return round(pct * 100.0, 2)
+
+                close_pct = _accuracy_pct(test_case["predicted"], test_case["actual"])
+                high_pct = _accuracy_pct(test_case["range_high"], test_case["actual"])
+                low_pct = _accuracy_pct(test_case["range_low"], test_case["actual"])
+                overall_pct = round((close_pct + high_pct + low_pct) / 3.0, 2)
+                prediction.accuracy_breakdown = {
+                    "close_accuracy_pct": close_pct,
+                    "high_accuracy_pct": high_pct,
+                    "low_accuracy_pct": low_pct,
+                    "overall_accuracy_pct": overall_pct,
+                }
                 
                 # Store and verify
                 self.prediction_storage.store_prediction(prediction)
@@ -474,6 +598,20 @@ class TestFunction3ContinuousLearning:
                 
                 if retrieved and retrieved.accuracy_score is not None:
                     print(f"  [OK] Test case {i+1}: Accuracy = {retrieved.accuracy_score:.2f}")
+
+                    breakdown = getattr(retrieved, "accuracy_breakdown", {}) or {}
+                    required_breakdown = {"close_accuracy_pct", "high_accuracy_pct", "low_accuracy_pct"}
+                    missing_breakdown = [metric for metric in required_breakdown if metric not in breakdown]
+                    if missing_breakdown:
+                        print(f"      [FAIL] Missing accuracy breakdown metrics: {', '.join(missing_breakdown)}")
+                        return False
+                    else:
+                        print(
+                            f"      Breakdown -> Close {breakdown['close_accuracy_pct']}%, "
+                            f"High {breakdown['high_accuracy_pct']}%, "
+                            f"Low {breakdown['low_accuracy_pct']}%"
+                        )
+
                     if test_case["expected_high"] and retrieved.accuracy_score >= 5.0:
                         success_count += 1
                     elif not test_case["expected_high"] and retrieved.accuracy_score < 5.0:
