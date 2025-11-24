@@ -44,11 +44,17 @@ def calculate_performance_metrics(trades: List[Dict]) -> Dict:
     if not trades:
         return {
             "total_trades": 0,
+            "completed_trades": 0,
+            "open_trades": 0,
+            "wins": 0,
+            "losses": 0,
             "win_rate": 0.0,
             "profit_factor": 0.0,
             "max_drawdown": 0.0,
             "total_pnl": 0.0,
-            "avg_pnl": 0.0
+            "avg_pnl": 0.0,
+            "total_profit": 0.0,
+            "total_loss": 0.0
         }
     
     # Filter completed trades
@@ -57,12 +63,17 @@ def calculate_performance_metrics(trades: List[Dict]) -> Dict:
     if not completed:
         return {
             "total_trades": len(trades),
+            "completed_trades": 0,
             "open_trades": len([t for t in trades if not t.get("exit_time")]),
+            "wins": 0,
+            "losses": 0,
             "win_rate": 0.0,
             "profit_factor": 0.0,
             "max_drawdown": 0.0,
             "total_pnl": 0.0,
-            "avg_pnl": 0.0
+            "avg_pnl": 0.0,
+            "total_profit": 0.0,
+            "total_loss": 0.0
         }
     
     wins = [t for t in completed if t.get("pnl", 0) > 0]
@@ -199,34 +210,91 @@ def generate_performance_report(ticker: Optional[str] = None) -> str:
     Returns:
         Formatted performance report string
     """
-    logger = get_trade_logger()
-    trades = logger.get_trades(ticker=ticker)
-    
-    metrics = calculate_performance_metrics(trades)
-    comparison = compare_predicted_vs_actual(trades)
-    patterns = identify_patterns(trades)
-    
-    report = f"""
+    try:
+        logger = get_trade_logger()
+        trades = logger.get_trades(ticker=ticker) if hasattr(logger, 'get_trades') else []
+        
+        metrics = calculate_performance_metrics(trades)
+        comparison = compare_predicted_vs_actual(trades)
+        patterns = identify_patterns(trades)
+        
+        # Use .get() with defaults for safe access
+        report = f"""
 Performance Report
 {'=' * 50}
-Total Trades: {metrics['total_trades']}
-Completed: {metrics['completed_trades']}
-Open: {metrics['open_trades']}
+Total Trades: {metrics.get('total_trades', 0)}
+Completed: {metrics.get('completed_trades', 0)}
+Open: {metrics.get('open_trades', 0)}
 
-Win Rate: {metrics['win_rate']:.2%}
-Profit Factor: {metrics['profit_factor']:.2f}
-Max Drawdown: ${metrics['max_drawdown']:.2f}
+Win Rate: {metrics.get('win_rate', 0.0):.2%}
+Profit Factor: {metrics.get('profit_factor', 0.0):.2f}
+Max Drawdown: ${metrics.get('max_drawdown', 0.0):.2f}
 
-Total P/L: ${metrics['total_pnl']:.2f}
-Average P/L: ${metrics['avg_pnl']:.2f}
+Total P/L: ${metrics.get('total_pnl', 0.0):.2f}
+Average P/L: ${metrics.get('avg_pnl', 0.0):.2f}
 
-Prediction Accuracy: {comparison['accuracy']:.2%}
-Average Prediction Error: {comparison['avg_prediction_error']:.4f}
+Prediction Accuracy: {comparison.get('accuracy', 0.0):.2%}
+Average Prediction Error: {comparison.get('avg_prediction_error', 0.0):.4f}
 
 High Confidence Win Rate: {patterns.get('high_confidence_win_rate', 0):.2%}
 Average Confidence (Wins): {patterns.get('avg_confidence_wins', 0):.3f}
 Average Confidence (Losses): {patterns.get('avg_confidence_losses', 0):.3f}
 """
-    
-    return report
+        
+        return report
+    except Exception as e:
+        # Return error message instead of crashing
+        import traceback
+        error_msg = f"""
+Performance Report - Error
+{'=' * 50}
+Error generating performance report: {type(e).__name__}: {str(e)}
+
+Please check logs/error.log for details.
+"""
+        # Try to log the error - use multiple import strategies
+        try:
+            # Try relative import first
+            try:
+                from .error_logger import log_exception
+            except (ImportError, ValueError):
+                # Try absolute import
+                try:
+                    from logging.error_logger import log_exception
+                except (ImportError, ValueError):
+                    # Try direct import
+                    import sys
+                    import importlib.util
+                    from pathlib import Path
+                    v14_root = Path(__file__).parent.parent
+                    error_logger_spec = importlib.util.spec_from_file_location(
+                        "error_logger", v14_root / "logging" / "error_logger.py"
+                    )
+                    error_logger_module = importlib.util.module_from_spec(error_logger_spec)
+                    sys.modules['error_logger'] = error_logger_module
+                    error_logger_spec.loader.exec_module(error_logger_module)
+                    log_exception = error_logger_module.log_exception
+            
+            log_exception(
+                "Error generating performance report",
+                e,
+                component="analyzer",
+                function="generate_performance_report",
+                is_hard_error=False
+            )
+        except Exception:
+            # If logger fails, write directly
+            try:
+                from pathlib import Path
+                from datetime import datetime
+                logs_dir = Path(__file__).parent.parent.parent / 'logs'
+                logs_dir.mkdir(parents=True, exist_ok=True)
+                error_log = logs_dir / 'error.log'
+                with open(error_log, 'a', encoding='utf-8') as f:
+                    f.write(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] ERROR [analyzer][generate_performance_report]: Error generating performance report | Exception: {type(e).__name__}: {str(e)}\n")
+                    f.write(traceback.format_exc() + "\n")
+            except Exception:
+                pass
+        
+        return error_msg
 

@@ -1,0 +1,63 @@
+{
+  "entrypoint": "C:\\Users\\edwar\\OneDrive\\Pictures\\Documents\\GitHub\\Stock\\Stock Report\\V15\\Stock Analyzer V15.py",
+  "V15_ROOT": "C:\\Users\\edwar\\OneDrive\\Pictures\\Documents\\GitHub\\Stock\\Stock Report\\V15",
+  "start_time": "2025-11-23T20:39:43.986858",
+  "end_time": "2025-11-23T20:39:44.018322",
+  "duration_seconds": 0.031464,
+  "overall": {
+    "total_tests": 26,
+    "passed_tests": 6,
+    "failed_tests": 20,
+    "success_rate": 23.076923076923077
+  },
+  "function_stats": {
+    "function_1": {
+      "total": 12,
+      "passed": 4,
+      "failed": 8,
+      "success_rate": 33.33333333333333
+    },
+    "function_3": {
+      "total": 14,
+      "passed": 2,
+      "failed": 12,
+      "success_rate": 14.285714285714285
+    }
+  },
+  "detailed_results": {
+    "function_1": {
+      "data_fetching_all_intervals": true,
+      "predictions_all_intervals": true,
+      "prediction_format_validity": true,
+      "market_sentiment_overview": false,
+      "sentiment_interpretation": false,
+      "data_interpretation": false,
+      "technical_indicators": false,
+      "feature_extraction": false,
+      "multiple_ticker_analysis": false,
+      "prediction_consistency": false,
+      "error_handling": true,
+      "performance": false
+    },
+    "function_2": {
+      "disabled": true,
+      "reason": "No linked accounts"
+    },
+    "function_3": {
+      "prediction_storage": true,
+      "prediction_creation": false,
+      "prediction_evaluation": false,
+      "accuracy_scoring": false,
+      "confidence_calibration": false,
+      "interval_specific_learning": false,
+      "parameter_optimization": false,
+      "trade_outcome_integration": true,
+      "constant_learning_engine": false,
+      "learning_statistics": false,
+      "settings_integration": false,
+      "autonomous_operation": false,
+      "expired_prediction_detection": false,
+      "parameter_update_history": false
+    }
+  }
+}

@@ -1,0 +1,98 @@
+================================================================================
+STOCK ANALYZER V15 - TEST SUMMARY
+================================================================================
+
+Start Time: 2025-11-24 13:47:22
+End Time: 2025-11-24 13:47:31
+Duration: 9.60 seconds
+
+================================================================================
+TEST RESULTS
+================================================================================
+
+
+Root Level Tests:
+  test_v15.py: [FAIL] FAILED
+  test_core_functions.py: [OK] PASSED
+  test_constant_learning.py: [OK] PASSED
+
+Test Suite Functions:
+  entrypoint_detection: [OK] PASSED
+  function_1_suite: [OK] PASSED
+  function_3_suite: [OK] PASSED
+
+Core Functions:
+  function_1: [OK] PASSED
+  function_2: [OK] PASSED
+  function_3: [OK] PASSED
+
+Menu Options:
+
+================================================================================
+FAILURES
+================================================================================
+
+Failure 1: Root Test: test_v15.py
+Error: Test failed
+--------------------------------------------------------------------------------
+
+Failure 2: Menu Options Import
+Error: [Errno 2] No such file or directory: 'C:\\Users\\edwar\\Documents\\GitHub\\Stock\\Stock Report\\V15\\logging\\trade_logger.py'
+--------------------------------------------------------------------------------
+
+
+================================================================================
+ERROR LOGS SUMMARY
+================================================================================
+
+
+--- debug.log (.cursor) ---{"sessionId": "debug-session", "runId": "run1", "hypothesisId": "A", "location": "Stock Analyzer V14.py:main", "message": "Function entry", "data": {"v14_root": "C:\\Users\\edwar\\Documents\\Stock Report\\V14"}, "timestamp": 1763917252261}
+{"sessionId": "debug-session", "runId": "run1", "hypothesisId": "C", "location": "Stock Analyzer V14.py:main", "message": "Before initialize_structure", "data": {}, "timestamp": 1763917252261}
+{"sessionId": "debug-session", "runId": "run1", "hypothesisId": "C", "location": "core/portable_paths.py:_get_project_root", "message": "Function entry", "data": {"__file__": "C:\\Users\\edwar\\Documents\\Stock Report\\V14\\core\\portable_paths.py"}, "timestamp": 1763917252262}
+{"sessionId": "debug-session", "runId": "run1", "hypothesisId": "C", "location": "core/portable_paths.py:_get_project_root", "message": "Function exit", "data": {"current_file": "C:\\Users\\edwar\\Documents\\Stock Report\\V14\\core\\portable_paths.py", "project_root": "C:\\Users\\edwar\\Documents\\Stock Report\\V14", "exists": true}, "timestamp": 1763917252262}
+{"sessionId": "debug-session", "runId": "run1", "hypothesisId": "A", "location": "Stock Analyzer V14.py:main", "message": "Function entry", "data": {"v14_root": "C:\\Users\\edwar\\Documents\\Stock Report\\V14"}, "timestamp": 1763917252262}
+{"sessionId": "debug-session", "runId": "run1", "hypothesisId": "C", "location": "Stock Analyzer V14.py:main", "message": "Before initialize_structure", "data": {}, "timestamp": 1763917252263}
+{"sessionId": "debug-session", "runId": "run1", "hypothesisId": "C", "location": "core/portable_paths.py:_get_project_root", "message": "Function entry", "data": {"__file__": "C:\\Users\\edwar\\Documents\\Stock Report\\V14\\core\\portable_paths.py"}, "timestamp": 1763917252263}
+{"sessionId": "debug-session", "runId": "run1", "hypothesisId": "C", "location": "core/portable_paths.py:_get_project_root", "message": "Function exit", "data": {"current_file": "C:\\Users\\edwar\\Documents\\Stock Report\\V14\\core\\portable_paths.py", "project_root": "C:\\Users\\edwar\\Documents\\Stock Report\\V14", "exists": true}, "timestamp": 1763917252264}
+{"sessionId": "debug-session", "runId": "run1", "hypothesisId": "C", "location": "Stock Analyzer V14.py:main", "message": "After initialize_structure", "data": {"success": true}, "timestamp": 1763917252266}
+{"sessionId": "debug-session", "runId": "run1", "hypothesisId": "B", "location": "Stock Analyzer V14.py:main", "message": "Before is_first_run", "data": {}, "timestamp": 1763917252266}
+{"sessionId": "debug-session", "runId": "run1", "hypothesisId": "C", "location": "core/portable_paths.py:get_path", "message": "Function entry", "data": {"type": "data"}, "timestamp": 1763917252266}
+{"sessionId": "debug-session", "runId": "run1", "hypothesisId": "C", "location": "core/portable_paths.py:get_path", "message": "Function exit", "data": {"type": "data", "result": "C:\\Users\\edwar\\Documents\\Stock Report\\V14\\data", "exists": true}, "timestamp": 1763917252266}
+{"sessionId": "debug-session", "runId": "run1", "hypothesisId": "C", "location": "Stock Analyzer V14.py:main", "message": "After initialize_structure", "data": {"success": true}, "timestamp": 1763917252267}
+{"sessionId": "debug-session", "runId": "run1", "hypothesisId": "B", "location": "Stock Analyzer V14.py:main", "message": "After is_first_run", "data": {"is_first_run": false}, "timestamp": 1763917252267}
+{"sessionId": "debug-session", "runId": "run1", "hypothesisId": "B", "location": "Stock Analyzer V14.py:main", "message": "Before is_first_run", "data": {}, "timestamp": 1763917252267}
+{"sessionId": "debug-session", "runId": "run1", "hypothesisId": "D", "location": "Stock Analyzer V14.py:main", "message": "Before MenuController", "data": {}, "timestamp": 1763917252267}
+{"sessionId": "debug-session", "runId": "run1", "hypothesisId": "C", "location": "core/portable_paths.py:get_path", "message": "Function entry", "data": {"type": "data"}, "timestamp": 1763917252267}
+{"sessionId": "debug-session", "runId": "run1", "hypothesisId": "D", "location": "Stock Analyzer V14.py:main", "message": "MenuController created", "data": {}, "timestamp": 1763917252268}
+{"sessionId": "debug-session", "runId": "run1", "hypothesisId": "C", "location": "core/portable_paths.py:get_path", "message": "Function exit", "data": {"type": "data", "result": "C:\\Users\\edwar\\Documents\\Stock Report\\V14\\data", "exists": true}, "timestamp": 1763917252268}
+{"sessionId": "debug-session", "runId": "run1", "hypothesisId": "B", "location": "Stock Analyzer V14.py:main", "message": "After is_first_run", "data": {"is_first_run": false}, "timestamp": 1763917252268}
+{"sessionId": "debug-session", "runId": "run1", "hypothesisId": "D", "location": "Stock Analyzer V14.py:main", "message": "Before MenuController", "data": {}, "timestamp": 1763917252268}
+{"sessionId": "debug-session", "runId": "run1", "hypothesisId": "D", "location": "Stock Analyzer V14.py:main", "message": "MenuController created", "data": {}, "timestamp": 1763917252268}
+{"sessionId": "debug-session", "runId": "run1", "hypothesisId": "A", "location": "Stock Analyzer V15.py:main", "message": "Function entry", "data": {"V15_ROOT": "C:\\Users\\edwar\\Documents\\GitHub\\Stock\\Stock Report\\V15"}, "timestamp": 1763986386474}
+{"sessionId": "debug-session", "runId": "run1", "hypothesisId": "C", "location": "Stock Analyzer V15.py:main", "message": "Before initialize_structure", "data": {}, "timestamp": 1763986386475}
+{"sessionId": "debug-session", "runId": "run1", "hypothesisId": "C", "location": "Stock Analyzer V15.py:main", "message": "After initialize_structure", "data": {"success": true}, "timestamp": 1763986386478}
+{"sessionId": "debug-session", "runId": "run1", "hypothesisId": "B", "location": "Stock Analyzer V15.py:main", "message": "Before is_first_run", "data": {}, "timestamp": 1763986386479}
+{"sessionId": "debug-session", "runId": "run1", "hypothesisId": "B", "location": "Stock Analyzer V15.py:main", "message": "After is_first_run", "data": {"is_first_run": false}, "timestamp": 1763986386479}
+{"sessionId": "debug-session", "runId": "run1", "hypothesisId": "D", "location": "Stock Analyzer V15.py:main", "message": "Before MenuController", "data": {}, "timestamp": 1763986386479}
+{"sessionId": "debug-session", "runId": "run1", "hypothesisId": "D", "location": "Stock Analyzer V15.py:main", "message": "MenuController created", "data": {}, "timestamp": 1763986386480}
+{"sessionId": "debug-session", "runId": "run1", "hypothesisId": "A", "location": "Stock Analyzer V15.py:main", "message": "Function entry", "data": {"V15_ROOT": "C:\\Users\\edwar\\Documents\\GitHub\\Stock\\Stock Report\\V15"}, "timestamp": 1763986525249}
+{"sessionId": "debug-session", "runId": "run1", "hypothesisId": "C", "location": "Stock Analyzer V15.py:main", "message": "Before initialize_structure", "data": {}, "timestamp": 1763986525249}
+{"sessionId": "debug-session", "runId": "run1", "hypothesisId": "C", "location": "Stock Analyzer V15.py:main", "message": "After initialize_structure", "data": {"success": true}, "timestamp": 1763986525254}
+{"sessionId": "debug-session", "runId": "run1", "hypothesisId": "B", "location": "Stock Analyzer V15.py:main", "message": "Before is_first_run", "data": {}, "timestamp": 1763986525254}
+{"sessionId": "debug-session", "runId": "run1", "hypothesisId": "B", "location": "Stock Analyzer V15.py:main", "message": "After is_first_run", "data": {"is_first_run": false}, "timestamp": 1763986525254}
+{"sessionId": "debug-session", "runId": "run1", "hypothesisId": "D", "location": "Stock Analyzer V15.py:main", "message": "Before MenuController", "data": {}, "timestamp": 1763986525255}
+{"sessionId": "debug-session", "runId": "run1", "hypothesisId": "D", "location": "Stock Analyzer V15.py:main", "message": "MenuController created", "data": {}, "timestamp": 1763986525256}
+{"sessionId": "debug-session", "runId": "run1", "hypothesisId": "A", "location": "Stock Analyzer V15.py:main", "message": "Function entry", "data": {"V15_ROOT": "C:\\Users\\edwar\\Documents\\GitHub\\Stock\\Stock Report\\V15"}, "timestamp": 1763987234403}
+{"sessionId": "debug-session", "runId": "run1", "hypothesisId": "C", "location": "Stock Analyzer V15.py:main", "message": "Before initialize_structure", "data": {}, "timestamp": 1763987234403}
+{"sessionId": "debug-session", "runId": "run1", "hypothesisId": "C", "location": "Stock Analyzer V15.py:main", "message": "After initialize_structure", "data": {"success": true}, "timestamp": 1763987234407}
+{"sessionId": "debug-session", "runId": "run1", "hypothesisId": "B", "location": "Stock Analyzer V15.py:main", "message": "Before is_first_run", "data": {}, "timestamp": 1763987234407}
+{"sessionId": "debug-session", "runId": "run1", "hypothesisId": "B", "location": "Stock Analyzer V15.py:main", "message": "After is_first_run", "data": {"is_first_run": false}, "timestamp": 1763987234407}
+{"sessionId": "debug-session", "runId": "run1", "hypothesisId": "D", "location": "Stock Analyzer V15.py:main", "message": "Before MenuController", "data": {}, "timestamp": 1763987234407}
+{"sessionId": "debug-session", "runId": "run1", "hypothesisId": "D", "location": "Stock Analyzer V15.py:main", "message": "MenuController created", "data": {}, "timestamp": 1763987234408}
+{"sessionId": "debug-session", "runId": "run1", "hypothesisId": "A", "location": "Stock Analyzer V15.py:main", "message": "Function entry", "data": {"V15_ROOT": "C:\\Users\\edwar\\Documents\\GitHub\\Stock\\Stock Report\\V15"}, "timestamp": 1763988812107}
+{"sessionId": "debug-session", "runId": "run1", "hypothesisId": "C", "location": "Stock Analyzer V15.py:main", "message": "Before initialize_structure", "data": {}, "timestamp": 1763988812108}
+{"sessionId": "debug-session", "runId": "run1", "hypothesisId": "C", "location": "Stock Analyzer V15.py:main", "message": "After initialize_structure", "data": {"success": true}, "timestamp": 1763988812112}
+{"sessionId": "debug-session", "runId": "run1", "hypothesisId": "B", "location": "Stock Analyzer V15.py:main", "message": "Before is_first_run", "data": {}, "timestamp": 1763988812112}
+{"sessionId": "debug-session", "runId": "run1", "hypothesisId": "B", "location": "Stock Analyzer V15.py:main", "message": "After is_first_run", "data": {"is_first_run": false}, "timestamp": 1763988812113}
+{"sessionId": "debug-session", "runId": "run1", "hypothesisId": "D", "location": "Stock Analyzer V15.py:main", "message": "Before MenuController", "data": {}, "timestamp": 1763988812113}
+{"sessionId": "debug-session", "runId": "run1", "hypothesisId": "D", "location": "Stock Analyzer V15.py:main", "message": "MenuController created", "data": {}, "timestamp": 1763988812113}

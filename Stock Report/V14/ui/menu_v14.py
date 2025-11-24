@@ -18,6 +18,15 @@ try:
     from ..sentiment.override import get_sentiment_override
     from ..logging.trade_logger import get_trade_logger
     from ..logging.analyzer import generate_performance_report
+    # Import error logger
+    try:
+        from ..logging.error_logger import log_exception, log_error, log_warning, log_info
+    except ImportError:
+        # Fallback if error_logger not available
+        def log_exception(*args, **kwargs): pass
+        def log_error(*args, **kwargs): pass
+        def log_warning(*args, **kwargs): pass
+        def log_info(*args, **kwargs): pass
 except ImportError:
     # Fallback for direct execution
     v14_root = Path(__file__).parent.parent
@@ -55,6 +64,55 @@ except ImportError:
     sys_module.modules['v14_logging.trade_logger'] = trade_logger_module
     analyzer_spec.loader.exec_module(analyzer_module)
     generate_performance_report = analyzer_module.generate_performance_report
+    # Import error logger in fallback path
+    try:
+        error_logger_spec = importlib.util.spec_from_file_location(
+            "v14_logging.error_logger", v14_root / "logging" / "error_logger.py"
+        )
+        error_logger_module = importlib.util.module_from_spec(error_logger_spec)
+        sys_module.modules['v14_logging.error_logger'] = error_logger_module
+        # Set up sys.modules for error_logger's imports
+        sys_module.modules['logging.error_logger'] = error_logger_module
+        error_logger_spec.loader.exec_module(error_logger_module)
+        log_exception = error_logger_module.log_exception
+        log_error = error_logger_module.log_error
+        log_warning = error_logger_module.log_warning
+        log_info = error_logger_module.log_info
+    except Exception as e:
+        # Fallback error logger functions if import fails
+        # These will write directly to error log if needed
+        def _write_error_direct(message, error=None, component=None, function=None):
+            try:
+                from pathlib import Path
+                from datetime import datetime
+                logs_dir = v14_root.parent / 'logs'
+                logs_dir.mkdir(parents=True, exist_ok=True)
+                error_log = logs_dir / 'error.log'
+                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                with open(error_log, 'a', encoding='utf-8') as f:
+                    f.write(f"[{timestamp}] ERROR")
+                    if component:
+                        f.write(f" [{component}]")
+                    if function:
+                        f.write(f" [{function}]")
+                    f.write(f": {message}")
+                    if error:
+                        f.write(f" | Exception: {type(error).__name__}: {str(error)}\n")
+                        import traceback
+                        f.write(traceback.format_exc())
+                    else:
+                        f.write("\n")
+            except Exception:
+                pass
+        
+        def log_exception(msg, err, component=None, function=None, **kwargs):
+            _write_error_direct(msg, err, component, function)
+        def log_error(msg, error=None, component=None, function=None, **kwargs):
+            _write_error_direct(msg, error, component, function)
+        def log_warning(msg, component=None, function=None, **kwargs):
+            _write_error_direct(msg, None, component, function)
+        def log_info(msg, component=None, function=None, **kwargs):
+            pass  # Info logging is optional
 
 
 class MenuController:
@@ -97,6 +155,13 @@ class MenuController:
             print("\n0. Exit")
             print("-" * 70)
         except Exception as e:
+            log_exception(
+                "Error displaying menu",
+                e,
+                component="menu",
+                function="display_main_menu",
+                is_hard_error=False
+            )
             print(f"\nERROR displaying menu: {e}")
             # Fallback to basic menu
             print("\n" + "=" * 70)
@@ -147,14 +212,29 @@ class MenuController:
                     else:
                         print("Invalid choice. Please try again.")
                 except KeyboardInterrupt:
+                    log_info("User interrupted menu", component="menu", function="run")
                     print("\n\nExiting menu...")
                     self.running = False
                 except Exception as e:
+                    log_exception(
+                        "Error in main menu loop",
+                        e,
+                        component="menu",
+                        function="run",
+                        is_hard_error=False
+                    )
                     print(f"\nERROR in menu: {e}")
                     import traceback
                     traceback.print_exc()
                     input("\nPress Enter to continue...")
         except Exception as e:
+            log_exception(
+                "FATAL ERROR in menu system",
+                e,
+                component="menu",
+                function="run",
+                is_hard_error=True
+            )
             print(f"\nFATAL ERROR in menu system: {e}")
             import traceback
             traceback.print_exc()
@@ -163,25 +243,89 @@ class MenuController:
     def _handle_v14_features_menu(self):
         """Handle V14 features menu."""
         while True:
-            self.display_v14_features_menu()
-            choice = input("\nEnter choice: ").strip().upper()
-            
-            if choice == "0":
+            try:
+                self.display_v14_features_menu()
+                choice = input("\nEnter choice: ").strip().upper()
+                
+                if choice == "0":
+                    break
+                elif choice == "5A":
+                    self._unified_model_prediction()
+                elif choice == "5B":
+                    self._select_risk_profile()
+                elif choice == "5C":
+                    self._browser_automation_status()
+                elif choice == "5D":
+                    self._sentiment_override_settings()
+                elif choice == "5E":
+                    self._trade_log_analysis()
+                elif choice == "5F":
+                    try:
+                        self._performance_report()
+                    except Exception as e:
+                        # Ensure error is logged even if _performance_report fails
+                        try:
+                            log_exception(
+                                "Error in performance report (5F)",
+                                e,
+                                component="menu",
+                                function="_handle_v14_features_menu",
+                                is_hard_error=False
+                            )
+                        except Exception:
+                            # If logger fails, write directly to error log
+                            try:
+                                from pathlib import Path
+                                from datetime import datetime
+                                logs_dir = Path(__file__).parent.parent.parent / 'logs'
+                                logs_dir.mkdir(parents=True, exist_ok=True)
+                                error_log = logs_dir / 'error.log'
+                                with open(error_log, 'a', encoding='utf-8') as f:
+                                    f.write(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] ERROR [menu][_handle_v14_features_menu]: Error in performance report (5F) | Exception: {type(e).__name__}: {str(e)}\n")
+                                    import traceback
+                                    f.write(traceback.format_exc() + "\n")
+                            except Exception:
+                                pass
+                        print(f"\n❌ Error in performance report: {e}")
+                        import traceback
+                        traceback.print_exc()
+                        input("\nPress Enter to continue...")
+                else:
+                    print("Invalid choice.")
+            except KeyboardInterrupt:
+                try:
+                    log_info("User interrupted V14 features menu", component="menu", function="_handle_v14_features_menu")
+                except Exception:
+                    pass
+                print("\n\nReturning to main menu...")
                 break
-            elif choice == "5A":
-                self._unified_model_prediction()
-            elif choice == "5B":
-                self._select_risk_profile()
-            elif choice == "5C":
-                self._browser_automation_status()
-            elif choice == "5D":
-                self._sentiment_override_settings()
-            elif choice == "5E":
-                self._trade_log_analysis()
-            elif choice == "5F":
-                self._performance_report()
-            else:
-                print("Invalid choice.")
+            except Exception as e:
+                try:
+                    log_exception(
+                        "Error in V14 features menu",
+                        e,
+                        component="menu",
+                        function="_handle_v14_features_menu",
+                        is_hard_error=False
+                    )
+                except Exception:
+                    # If logger fails, write directly to error log
+                    try:
+                        from pathlib import Path
+                        from datetime import datetime
+                        logs_dir = Path(__file__).parent.parent.parent / 'logs'
+                        logs_dir.mkdir(parents=True, exist_ok=True)
+                        error_log = logs_dir / 'error.log'
+                        with open(error_log, 'a', encoding='utf-8') as f:
+                            f.write(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] ERROR [menu][_handle_v14_features_menu]: Error in V14 features menu | Exception: {type(e).__name__}: {str(e)}\n")
+                            import traceback
+                            f.write(traceback.format_exc() + "\n")
+                    except Exception:
+                        pass
+                print(f"\n❌ Error in menu: {e}")
+                import traceback
+                traceback.print_exc()
+                input("\nPress Enter to continue...")
     
     def _unified_model_prediction(self):
         """Generate prediction using unified model."""
@@ -225,6 +369,13 @@ class MenuController:
             print(f"\n❌ Error: Missing required dependency: {e}")
             print("Please install required packages: pip install scikit-learn pandas numpy")
         except Exception as e:
+            log_exception(
+                "Error generating prediction",
+                e,
+                component="menu",
+                function="_unified_model_prediction",
+                is_hard_error=False
+            )
             print(f"\n❌ Error generating prediction: {e}")
             import traceback
             traceback.print_exc()
@@ -298,6 +449,13 @@ class MenuController:
             else:
                 print("❌ Invalid choice.")
         except Exception as e:
+            log_exception(
+                "Error in menu function",
+                e,
+                component="menu",
+                function="_select_risk_profile",
+                is_hard_error=False
+            )
             print(f"\n❌ Error: {e}")
             import traceback
             traceback.print_exc()
@@ -334,6 +492,13 @@ class MenuController:
                             print("   2. Required library is installed (pip install undetected-chromedriver)")
                             self.browser_automation = None
                     except Exception as e:
+                        log_exception(
+                            "Error initializing browser automation",
+                            e,
+                            component="menu",
+                            function="_browser_automation_status",
+                            is_hard_error=False
+                        )
                         print(f"❌ Error initializing: {e}")
                         self.browser_automation = None
             else:
@@ -347,6 +512,13 @@ class MenuController:
                     self.browser_automation = None
                     print("✅ Browser closed")
         except Exception as e:
+            log_exception(
+                "Error in menu function",
+                e,
+                component="menu",
+                function="_select_risk_profile",
+                is_hard_error=False
+            )
             print(f"\n❌ Error: {e}")
             import traceback
             traceback.print_exc()
@@ -400,6 +572,13 @@ class MenuController:
                 else:
                     print(f"Ticker {ticker} is not blocked")
         except Exception as e:
+            log_exception(
+                "Error in menu function",
+                e,
+                component="menu",
+                function="_select_risk_profile",
+                is_hard_error=False
+            )
             print(f"\n❌ Error: {e}")
             import traceback
             traceback.print_exc()
@@ -473,6 +652,13 @@ class MenuController:
                     pnl_str = f"${trade.get('pnl', 0):.2f}" if trade.get("pnl") is not None else "N/A"
                     print(f"{status} | {trade.get('ticker', 'N/A')} | {trade.get('side', 'N/A')} | P/L: {pnl_str}")
         except Exception as e:
+            log_exception(
+                "Error in menu function",
+                e,
+                component="menu",
+                function="_select_risk_profile",
+                is_hard_error=False
+            )
             print(f"\n❌ Error: {e}")
             import traceback
             traceback.print_exc()
@@ -489,7 +675,46 @@ class MenuController:
             ticker_filter = input("Filter by ticker? (Enter ticker symbol or press Enter for all): ").strip().upper()
             ticker = ticker_filter if ticker_filter else None
             
-            report = generate_performance_report(ticker=ticker)
+            # Call with error handling wrapper
+            try:
+                report = generate_performance_report(ticker=ticker)
+            except KeyError as ke:
+                # Handle KeyError specifically - might be from cached bytecode
+                log_exception(
+                    f"KeyError in performance report (possibly cached bytecode): {ke}",
+                    ke,
+                    component="menu",
+                    function="_performance_report",
+                    is_hard_error=False
+                )
+                report = f"""
+Performance Report - Error
+{'=' * 50}
+Error: Missing key in metrics: {ke}
+This may be due to cached Python bytecode (.pyc files).
+
+Please try:
+1. Delete __pycache__ folders in V14 directory
+2. Restart the application
+
+Error details logged to logs/error.log
+"""
+            except Exception as e:
+                # Catch any other errors
+                log_exception(
+                    "Error generating performance report",
+                    e,
+                    component="menu",
+                    function="_performance_report",
+                    is_hard_error=False
+                )
+                report = f"""
+Performance Report - Error
+{'=' * 50}
+Error generating performance report: {type(e).__name__}: {str(e)}
+
+Please check logs/error.log for details.
+"""
             
             print("\n" + "=" * 70)
             print(report)
@@ -507,8 +732,27 @@ class MenuController:
                         f.write(report)
                     print(f"✅ Report saved to: {report_file}")
                 except Exception as e:
+                    log_exception(
+                        "Error saving performance report",
+                        e,
+                        component="menu",
+                        function="_performance_report",
+                        is_hard_error=False
+                    )
                     print(f"❌ Error saving report: {e}")
         except Exception as e:
+            # Ensure logger is available before logging
+            try:
+                log_exception(
+                    "Error generating performance report",
+                    e,
+                    component="menu",
+                    function="_performance_report",
+                    is_hard_error=False
+                )
+            except Exception as log_err:
+                # If logging fails, at least print to console
+                print(f"\n⚠️  Error logger also failed: {log_err}")
             print(f"\n❌ Error generating report: {e}")
             import traceback
             traceback.print_exc()
@@ -551,7 +795,11 @@ class MenuController:
     def _toggle_continuous_training(self):
         """Start or stop continuous training."""
         try:
-            from learning.continuous_service import get_continuous_learning_service
+            # Try relative import first, fallback to absolute
+            try:
+                from ..learning.continuous_service import get_continuous_learning_service
+            except (ImportError, ValueError):
+                from learning.continuous_service import get_continuous_learning_service
             
             service = get_continuous_learning_service()
             status = service.get_status()
@@ -580,6 +828,13 @@ class MenuController:
                         print("❌ Failed to start continuous training")
         
         except Exception as e:
+            log_exception(
+                "Error toggling continuous training",
+                e,
+                component="menu",
+                function="_toggle_continuous_training",
+                is_hard_error=False
+            )
             print(f"❌ Error: {e}")
             import traceback
             traceback.print_exc()
@@ -589,7 +844,11 @@ class MenuController:
     def _review_training_performance(self):
         """Review training performance and history."""
         try:
-            from learning.model_updater import get_model_updater
+            # Try relative import first, fallback to absolute
+            try:
+                from ..learning.model_updater import get_model_updater
+            except (ImportError, ValueError):
+                from learning.model_updater import get_model_updater
             
             updater = get_model_updater()
             history = updater.get_model_version_history()
@@ -613,6 +872,13 @@ class MenuController:
                 print(f"  Trained: {latest.get('timestamp', 'Unknown')}")
         
         except Exception as e:
+            log_exception(
+                "Error reviewing training performance",
+                e,
+                component="menu",
+                function="_review_training_performance",
+                is_hard_error=False
+            )
             print(f"❌ Error: {e}")
             import traceback
             traceback.print_exc()
@@ -622,7 +888,11 @@ class MenuController:
     def _trigger_manual_retraining(self):
         """Manually trigger model retraining."""
         try:
-            from learning.continuous_service import get_continuous_learning_service
+            # Try relative import first, fallback to absolute
+            try:
+                from ..learning.continuous_service import get_continuous_learning_service
+            except (ImportError, ValueError):
+                from learning.continuous_service import get_continuous_learning_service
             
             service = get_continuous_learning_service()
             
@@ -643,6 +913,13 @@ class MenuController:
                     print(f"  Available Trades: {result['available_trades']}")
         
         except Exception as e:
+            log_exception(
+                "Error triggering manual retraining",
+                e,
+                component="menu",
+                function="_trigger_manual_retraining",
+                is_hard_error=False
+            )
             print(f"❌ Error: {e}")
             import traceback
             traceback.print_exc()
@@ -652,9 +929,15 @@ class MenuController:
     def _reset_learned_model(self):
         """Reset learned model to initial state."""
         try:
-            from learning.model_updater import get_model_updater
-            from model.unified_model import get_model
-            from core.timeframes import CFD_TIMEFRAMES, INVESTMENT_TIMEFRAMES
+            # Try relative imports first, fallback to absolute
+            try:
+                from ..learning.model_updater import get_model_updater
+                from ..model.unified_model import get_model
+                from ..core.timeframes import CFD_TIMEFRAMES, INVESTMENT_TIMEFRAMES
+            except (ImportError, ValueError):
+                from learning.model_updater import get_model_updater
+                from model.unified_model import get_model
+                from core.timeframes import CFD_TIMEFRAMES, INVESTMENT_TIMEFRAMES
             
             confirm = input("\n⚠️  Are you sure you want to reset all learned models? This cannot be undone. Type 'yes' to confirm: ").strip().lower()
             
@@ -689,6 +972,13 @@ class MenuController:
             print("Models will need to be retrained from scratch.")
         
         except Exception as e:
+            log_exception(
+                "Error resetting learned model",
+                e,
+                component="menu",
+                function="_reset_learned_model",
+                is_hard_error=False
+            )
             print(f"❌ Error: {e}")
             import traceback
             traceback.print_exc()
@@ -923,10 +1213,17 @@ class MenuController:
         print("=" * 70)
         
         try:
-            from learning.constant_learning_engine import get_constant_learning_engine
-            from learning.parameter_optimizer import get_parameter_optimizer
-            from core.timeframes import CONSTANT_LEARNING_INTERVALS
-            from core.portable_paths import get_data_path
+            # Try relative imports first, fallback to absolute
+            try:
+                from ..learning.constant_learning_engine import get_constant_learning_engine
+                from ..learning.parameter_optimizer import get_parameter_optimizer
+                from ..core.timeframes import CONSTANT_LEARNING_INTERVALS
+                from ..core.portable_paths import get_data_path
+            except (ImportError, ValueError):
+                from learning.constant_learning_engine import get_constant_learning_engine
+                from learning.parameter_optimizer import get_parameter_optimizer
+                from core.timeframes import CONSTANT_LEARNING_INTERVALS
+                from core.portable_paths import get_data_path
             import json
             
             engine = get_constant_learning_engine()
@@ -1030,7 +1327,11 @@ class MenuController:
         print("=" * 70)
         
         try:
-            from learning.learning_statistics import get_learning_statistics
+            # Try relative import first, fallback to absolute
+            try:
+                from ..learning.learning_statistics import get_learning_statistics
+            except (ImportError, ValueError):
+                from learning.learning_statistics import get_learning_statistics
             
             stats = get_learning_statistics()
             report = stats.generate_report()

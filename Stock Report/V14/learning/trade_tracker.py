@@ -267,11 +267,13 @@ class TradeTracker:
     
     def __init__(self):
         """Initialize trade tracker."""
+        breakpoint()  # DEBUG: Inspect tracker initialization
         self.outcomes: List[TradeOutcome] = []
         self._load_outcomes()
     
     def add_outcome(self, outcome: TradeOutcome) -> None:
         """Add a trade outcome."""
+        breakpoint()  # DEBUG: Inspect outcome being added
         self.outcomes.append(outcome)
         self._save_outcomes()
     
@@ -309,6 +311,7 @@ class TradeTracker:
         """
         # Get filtered outcomes
         outcomes = self.get_outcomes(ticker=ticker, timeframe=timeframe)
+        breakpoint()  # DEBUG: Inspect filtered outcomes before statistics calculation
         
         if not outcomes:
             return {
@@ -779,13 +782,14 @@ Predictions with Actual: {stats['predictions_with_actual']}
         try:
             history_dir = _get_path('history')
             outcomes_file = history_dir / 'trade_outcomes.json'
-            
+            breakpoint()  # DEBUG: Inspect before saving outcomes
             outcomes_data = [outcome.to_dict() for outcome in self.outcomes]
             
             with open(outcomes_file, 'w') as f:
                 json.dump(outcomes_data, f, indent=2)
         except Exception:
             # Silent failure on save errors
+            breakpoint()  # DEBUG: Inspect save errors
             pass
     
     def _load_outcomes(self) -> None:
@@ -793,6 +797,7 @@ Predictions with Actual: {stats['predictions_with_actual']}
         try:
             history_dir = _get_path('history')
             outcomes_file = history_dir / 'trade_outcomes.json'
+            breakpoint()  # DEBUG: Inspect before loading outcomes
             
             if not outcomes_file.exists():
                 return
@@ -801,8 +806,10 @@ Predictions with Actual: {stats['predictions_with_actual']}
                 outcomes_data = json.load(f)
             
             self.outcomes = [TradeOutcome.from_dict(data) for data in outcomes_data]
+            breakpoint()  # DEBUG: Inspect after loading outcomes
         except Exception:
             # Silent failure on load errors
+            breakpoint()  # DEBUG: Inspect load errors
             self.outcomes = []
 
 
@@ -813,6 +820,7 @@ _trade_tracker: Optional[TradeTracker] = None
 def get_trade_tracker() -> TradeTracker:
     """Get global trade tracker instance."""
     global _trade_tracker
+    breakpoint()  # DEBUG: Inspect tracker singleton creation
     if _trade_tracker is None:
         _trade_tracker = TradeTracker()
     return _trade_tracker

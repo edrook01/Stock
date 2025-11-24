@@ -10,11 +10,35 @@ import asyncio
 # Handle both relative and absolute imports for portability
 try:
     from .timeframes import CFD_TIMEFRAMES, INVESTMENT_TIMEFRAMES, get_prediction_update_interval
-    from ..model.unified_model import get_model
-except ImportError:
+except (ImportError, ValueError):
     # Fallback for direct execution
     from core.timeframes import CFD_TIMEFRAMES, INVESTMENT_TIMEFRAMES, get_prediction_update_interval
-    from model.unified_model import get_model
+
+# Import model with multiple fallback strategies
+try:
+    from ..model.unified_model import get_model
+except (ImportError, ValueError):
+    # Fallback for direct execution or when relative imports fail
+    try:
+        from model.unified_model import get_model
+    except (ImportError, ValueError):
+        # Last resort: try importlib
+        try:
+            import sys
+            import importlib.util
+            from pathlib import Path
+            v14_root = Path(__file__).parent.parent
+            model_spec = importlib.util.spec_from_file_location(
+                "unified_model", v14_root / "model" / "unified_model.py"
+            )
+            model_module = importlib.util.module_from_spec(model_spec)
+            sys.modules['unified_model'] = model_module
+            model_spec.loader.exec_module(model_module)
+            get_model = model_module.get_model
+        except Exception:
+            # If all imports fail, create a dummy function
+            def get_model(timeframe: str):
+                raise ImportError("Could not import unified_model. Please ensure model/unified_model.py exists.")
 
 
 class PredictionScheduler:

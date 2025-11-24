@@ -38,7 +38,28 @@ try:
     from core.setup import initialize_v14, is_first_run
     from core.portable_paths import initialize_structure
     from ui.menu_v14 import MenuController
+    # Import error logger (after path is set up)
+    try:
+        from logging.error_logger import log_exception, log_error, log_warning, log_info
+    except ImportError:
+        # Fallback if error_logger not available
+        def log_exception(*args, **kwargs): pass
+        def log_error(*args, **kwargs): pass
+        def log_warning(*args, **kwargs): pass
+        def log_info(*args, **kwargs): pass
 except ImportError as e:
+    # Try to log before exit
+    try:
+        from logging.error_logger import log_exception
+        log_exception(
+            "Failed to import V14 modules",
+            e,
+            component="main",
+            function="import",
+            is_hard_error=True
+        )
+    except:
+        pass
     print(f"\nERROR: Failed to import V14 modules: {e}")
     print("\nThis may indicate:")
     print("1. Missing dependencies (run: pip install -r requirements.txt)")
@@ -49,6 +70,18 @@ except ImportError as e:
     input("\nPress Enter to exit...")
     sys.exit(1)
 except Exception as e:
+    # Try to log before exit
+    try:
+        from logging.error_logger import log_exception
+        log_exception(
+            "Unexpected error during import",
+            e,
+            component="main",
+            function="import",
+            is_hard_error=True
+        )
+    except:
+        pass
     print(f"\nERROR: Unexpected error during import: {e}")
     print("\nFull error details:")
     traceback.print_exc()
@@ -87,6 +120,7 @@ def main():
     # Initialize directory structure
     try:
         initialize_structure()
+        log_info("Directory structure initialized", component="main", function="initialize_structure")
         # #region agent log
         try:
             with open(debug_log_path, 'a', encoding='utf-8') as f:
@@ -95,6 +129,13 @@ def main():
             pass
         # #endregion
     except Exception as e:
+        log_exception(
+            "Failed to initialize directory structure",
+            e,
+            component="main",
+            function="initialize_structure",
+            is_hard_error=True
+        )
         # #region agent log
         try:
             with open(debug_log_path, 'a', encoding='utf-8') as f:
@@ -120,6 +161,12 @@ def main():
     try:
         is_first = is_first_run()
     except Exception as e:
+        log_warning(
+            "Failed to check first run status, assuming first run",
+            component="main",
+            function="is_first_run",
+            context={"error": str(e)}
+        )
         print(f"\nWARNING: Failed to check first run status: {e}")
         print("Assuming first run...")
         is_first = True
@@ -152,9 +199,18 @@ def main():
             # #endregion
             if result.get("initialized"):
                 print("✓ V14 initialized successfully!")
+                log_info("V14 initialized successfully", component="main", function="initialize_v14")
             else:
                 print("⚠ Initialization completed with warnings.")
+                log_warning("Initialization completed with warnings", component="main", function="initialize_v14")
         except Exception as e:
+            log_exception(
+                "Initialization failed, continuing anyway",
+                e,
+                component="main",
+                function="initialize_v14",
+                is_hard_error=False
+            )
             print(f"\nWARNING: Initialization failed: {e}")
             print("Continuing anyway...")
             traceback.print_exc()
@@ -170,6 +226,7 @@ def main():
     
     try:
         menu = MenuController()
+        log_info("MenuController created", component="main", function="main")
         # #region agent log
         try:
             with open(debug_log_path, 'a', encoding='utf-8') as f:
@@ -179,9 +236,17 @@ def main():
         # #endregion
         menu.run()
     except KeyboardInterrupt:
+        log_info("User interrupted program", component="main", function="main")
         print("\n\nExiting Stock Analyzer V14...")
         sys.exit(0)
     except Exception as e:
+        log_exception(
+            "Fatal error in main menu loop",
+            e,
+            component="main",
+            function="main",
+            is_hard_error=True
+        )
         # #region agent log
         try:
             with open(debug_log_path, 'a', encoding='utf-8') as f:
@@ -198,6 +263,7 @@ def main():
         print("1. Verify all dependencies are installed")
         print("2. Check that all required files are present")
         print("3. Review the error traceback for details")
+        print("4. Check logs/error.log for detailed error information")
         print("=" * 70)
         input("\nPress Enter to exit...")
         sys.exit(1)
@@ -207,6 +273,18 @@ if __name__ == "__main__":
     try:
         main()
     except Exception as e:
+        # Try to log critical error
+        try:
+            from logging.error_logger import log_exception
+            log_exception(
+                "CRITICAL: Program failed to start",
+                e,
+                component="main",
+                function="__main__",
+                is_hard_error=True
+            )
+        except:
+            pass
         print(f"\n\nCRITICAL ERROR: Program failed to start: {e}")
         print("\nFull error details:")
         traceback.print_exc()
@@ -215,6 +293,7 @@ if __name__ == "__main__":
         print("1. Missing or corrupted Python installation")
         print("2. Module import failures")
         print("3. System configuration issues")
+        print("4. Check logs/error.log for detailed error information")
         print("=" * 70)
         input("\nPress Enter to exit...")
         sys.exit(1)

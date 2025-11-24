@@ -1,0 +1,69 @@
+WARNING: Data fetcher not available: 'NoneType' object has no attribute 'DataFrame'
+
+======================================================================
+CORE FUNCTIONS - COMPREHENSIVE TEST SUITE
+======================================================================
+
+Testing all 3 core functions:
+  1. Ticker Analysis (Manual User Research)
+  2. Autonomous Trading
+  3. Constant Learning Model
+  + Integration between functions
+
+======================================================================
+TEST: Function 1 - Ticker Analysis (Manual User Research)
+======================================================================
+SKIPPED: Data fetcher not available (pandas may be missing)
+   This is OK - data fetching will work when pandas is installed
+
+======================================================================
+TEST: Function 2 - Autonomous Trading
+======================================================================
+WARNING: Trade tracker import issue (expected when running standalone): attempted relative import beyond top-level package
+   This is OK - trade tracker works when imported through main application
+
+======================================================================
+TEST: Function 3 - Constant Learning Model
+======================================================================
+python : Traceback (most recent call last):
+At line:1 char:1
++ python test_core_functions.py > test_output.txt 2>&1; Get-Content tes ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Traceback (most recent call last) 
+   ::String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+  File "C:\Users\edwar\OneDrive\Pictures\Documents\GitHub\Stock\Stock 
+Report\V15\test_core_functions.py", line 242, in 
+test_function_3_constant_learning
+    print(f"\u2705 Constant learning intervals defined: {', 
+'.join(CONSTANT_LEARNING_INTERVALS)}")
+    ~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^
+  File "C:\Program Files\Python313\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2705' in 
+position 0: character maps to <undefined>
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\edwar\OneDrive\Pictures\Documents\GitHub\Stock\Stock 
+Report\V15\test_core_functions.py", line 443, in <module>
+    main()
+    ~~~~^^
+  File "C:\Users\edwar\OneDrive\Pictures\Documents\GitHub\Stock\Stock 
+Report\V15\test_core_functions.py", line 414, in main
+    results["function_3"] = test_function_3_constant_learning()
+                            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\edwar\OneDrive\Pictures\Documents\GitHub\Stock\Stock 
+Report\V15\test_core_functions.py", line 324, in 
+test_function_3_constant_learning
+    print(f"\u274c ERROR: {e}")
+    ~~~~~^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\Python313\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u274c' in 
+position 0: character maps to <undefined>

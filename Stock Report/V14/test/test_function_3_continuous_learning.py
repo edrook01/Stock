@@ -12,7 +12,32 @@ Tests all aspects per Project Plan:
 """
 
 import sys
+import json
+import time
 from pathlib import Path
+
+AGENT_LOG_PATH = Path(r"c:\Users\edwar\Documents\GitHub\.cursor\debug.log")
+AGENT_SESSION_ID = "debug-session"
+AGENT_RUN_ID = "pre-fix"
+
+
+def _agent_log(hypothesis_id: str, location: str, message: str, data=None) -> None:
+    """Append a single NDJSON instrumentation log entry."""
+    payload = {
+        "sessionId": AGENT_SESSION_ID,
+        "runId": AGENT_RUN_ID,
+        "hypothesisId": hypothesis_id,
+        "location": location,
+        "message": message,
+        "data": data or {},
+        "timestamp": int(time.time() * 1000),
+    }
+    try:
+        with open(AGENT_LOG_PATH, "a", encoding="utf-8") as log_file:
+            log_file.write(json.dumps(payload) + "\n")
+    except Exception:
+        pass
+
 
 # CRITICAL FIX: Prevent local 'logging' directory from shadowing standard library
 test_dir = Path(__file__).parent
@@ -20,19 +45,60 @@ v14_root = test_dir.parent
 script_dir = str(v14_root)
 
 # Remove script directory from sys.path temporarily (if present)
+script_removed = False
 if script_dir in sys.path:
     sys.path.remove(script_dir)
+    script_removed = True
+#region agent log
+_agent_log(
+    "H1",
+    "test_function_3_continuous_learning.py:30",
+    "Removed script directory",
+    {"removed": script_removed, "sys_path_head": sys.path[:3]},
+)
+#endregion
 
 # Import standard library modules that might be shadowed
 import logging  # Standard library logging
 import asyncio  # Uses logging internally
+#region agent log
+_agent_log(
+    "H2",
+    "test_function_3_continuous_learning.py:42",
+    "Standard logging module state",
+    {
+        "logging_file": getattr(logging, "__file__", None),
+        "has_getLogger": hasattr(logging, "getLogger"),
+    },
+)
+#endregion
 
 # Now add V14 back to path (after critical imports are done)
 sys.path.insert(0, script_dir)
+#region agent log
+_agent_log(
+    "H3",
+    "test_function_3_continuous_learning.py:53",
+    "Reinserted script directory",
+    {"sys_path_head": sys.path[:3]},
+)
+#endregion
 
 # Setup path for test imports
 from test_entrypoint_detector import detect_and_setup
 entrypoint_path, v14_root = detect_and_setup()
+#region agent log
+_agent_log(
+    "H2",
+    "test_function_3_continuous_learning.py:62",
+    "detect_and_setup completed",
+    {
+        "entrypoint_path": str(entrypoint_path),
+        "v14_root": str(v14_root),
+        "logging_file": getattr(logging, "__file__", None),
+    },
+)
+#endregion
 
 # Now safe to import other modules
 from typing import Dict, List, Optional

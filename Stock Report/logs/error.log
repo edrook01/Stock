@@ -4,3 +4,109 @@
 [2025-11-22 13:54:06] ERROR: Deep learning engine error: UnifiedDeepEngine.predict() takes 4 positional arguments but 6 were given
 [2025-11-22 13:54:07] ERROR: Prediction logging error: The truth value of a Series is ambiguous. Use a.empty, a.bool(), a.item(), a.any() or a.all().
 [2025-11-22 13:54:07] ERROR: Training cycle error: 'tqdm' object is not an iterator
+[2025-11-24 12:13:15] ERROR[menu][_toggle_continuous_training]: Error toggling continuous training | Exception: ImportError: attempted relative import beyond top-level package
+Traceback (most recent call last):
+  File "C:\Users\edwar\Documents\GitHub\Stock\Stock Report\V15\ui\menu_v15.py", line 800, in _toggle_continuous_training
+    from ..learning.continuous_service import get_continuous_learning_service
+ImportError: attempted relative import beyond top-level package
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\edwar\Documents\GitHub\Stock\Stock Report\V15\learning\continuous_service.py", line 19, in <module>
+    from ..model.trainer import get_model_trainer
+ImportError: attempted relative import beyond top-level package
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\edwar\Documents\GitHub\Stock\Stock Report\V15\ui\menu_v15.py", line 802, in _toggle_continuous_training
+    from learning.continuous_service import get_continuous_learning_service
+  File "C:\Users\edwar\Documents\GitHub\Stock\Stock Report\V15\learning\continuous_service.py", line 25, in <module>
+    from model.trainer import get_model_trainer
+  File "C:\Users\edwar\Documents\GitHub\Stock\Stock Report\V15\model\trainer.py", line 14, in <module>
+    from ..core.portable_paths import get_path
+ImportError: attempted relative import beyond top-level package
+
+[2025-11-24 12:15:29] ERROR[menu][_toggle_continuous_training]: Error toggling continuous training | Exception: ImportError: attempted relative import beyond top-level package
+Traceback (most recent call last):
+  File "C:\Users\edwar\Documents\GitHub\Stock\Stock Report\V15\ui\menu_v15.py", line 800, in _toggle_continuous_training
+    from ..learning.continuous_service import get_continuous_learning_service
+ImportError: attempted relative import beyond top-level package
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\edwar\Documents\GitHub\Stock\Stock Report\V15\learning\continuous_service.py", line 19, in <module>
+    from ..model.trainer import get_model_trainer
+ImportError: attempted relative import beyond top-level package
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\edwar\Documents\GitHub\Stock\Stock Report\V15\ui\menu_v15.py", line 802, in _toggle_continuous_training
+    from learning.continuous_service import get_continuous_learning_service
+  File "C:\Users\edwar\Documents\GitHub\Stock\Stock Report\V15\learning\continuous_service.py", line 25, in <module>
+    from model.trainer import get_model_trainer
+  File "C:\Users\edwar\Documents\GitHub\Stock\Stock Report\V15\model\trainer.py", line 14, in <module>
+    from ..core.portable_paths import get_path
+ImportError: attempted relative import beyond top-level package
+
+[2025-11-24 12:27:43] ERROR[menu][_toggle_continuous_training]: Error toggling continuous training | Exception: ImportError: attempted relative import beyond top-level package
+Traceback (most recent call last):
+  File "C:\Users\edwar\Documents\GitHub\Stock\Stock Report\V15\ui\menu_v15.py", line 800, in _toggle_continuous_training
+    from ..learning.continuous_service import get_continuous_learning_service
+ImportError: attempted relative import beyond top-level package
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\edwar\Documents\GitHub\Stock\Stock Report\V15\learning\continuous_service.py", line 19, in <module>
+    from ..model.trainer import get_model_trainer
+ImportError: attempted relative import beyond top-level package
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\edwar\Documents\GitHub\Stock\Stock Report\V15\ui\menu_v15.py", line 802, in _toggle_continuous_training
+    from learning.continuous_service import get_continuous_learning_service
+  File "C:\Users\edwar\Documents\GitHub\Stock\Stock Report\V15\learning\continuous_service.py", line 25, in <module>
+    from model.trainer import get_model_trainer
+  File "C:\Users\edwar\Documents\GitHub\Stock\Stock Report\V15\model\trainer.py", line 14, in <module>
+    from ..core.portable_paths import get_path
+ImportError: attempted relative import beyond top-level package
+
+[2025-11-24 14:39:38] CRITICAL[main][import]: Failed to import V15 modules | Exception: ImportError: attempted relative import beyond top-level package | [HARD ERROR - FATAL]
+Traceback (most recent call last):
+  File "C:\Users\edwar\Documents\GitHub\Stock\Stock Report\V15\ui\menu_v15.py", line 15, in <module>
+    from ..core.portable_paths import get_path
+ImportError: attempted relative import beyond top-level package
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\edwar\Documents\GitHub\Stock\Stock Report\V15\Stock Analyzer V15.py", line 93, in <module>
+    from ui.menu_v15 import MenuController
+  File "C:\Users\edwar\Documents\GitHub\Stock\Stock Report\V15\ui\menu_v15.py", line 73, in <module>
+    from risk.equity_monitor import get_equity_monitor
+  File "C:\Users\edwar\Documents\GitHub\Stock\Stock Report\V15\risk\equity_monitor.py", line 11, in <module>
+    from ..core.portable_paths import get_path
+ImportError: attempted relative import beyond top-level package
+
+[2025-11-24 14:41:31] CRITICAL[main][import]: Failed to import V15 modules | Exception: ImportError: attempted relative import beyond top-level package | [HARD ERROR - FATAL]
+Traceback (most recent call last):
+  File "C:\Users\edwar\Documents\GitHub\Stock\Stock Report\V15\ui\menu_v15.py", line 15, in <module>
+    from ..core.portable_paths import get_path
+ImportError: attempted relative import beyond top-level package
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\edwar\Documents\GitHub\Stock\Stock Report\V15\Stock Analyzer V15.py", line 93, in <module>
+    from ui.menu_v15 import MenuController
+  File "C:\Users\edwar\Documents\GitHub\Stock\Stock Report\V15\ui\menu_v15.py", line 73, in <module>
+    from risk.equity_monitor import get_equity_monitor
+  File "C:\Users\edwar\Documents\GitHub\Stock\Stock Report\V15\risk\equity_monitor.py", line 11, in <module>
+    from ..core.portable_paths import get_path
+ImportError: attempted relative import beyond top-level package
+

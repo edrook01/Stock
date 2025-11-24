@@ -1,0 +1,211 @@
+[
+  {
+    "trade_id": "test1",
+    "timestamp": "2025-11-24T13:47:25.236135",
+    "prediction_error": null,
+    "prediction_correct": false,
+    "confidence_adjustment": -0.1,
+    "feature_weight_adjustments": {},
+    "pattern_notes": [
+      "High confidence failure - reduce confidence for similar patterns"
+    ]
+  },
+  {
+    "trade_id": "test1",
+    "timestamp": "2025-11-24T13:48:36.965989",
+    "prediction_error": null,
+    "prediction_correct": false,
+    "confidence_adjustment": -0.1,
+    "feature_weight_adjustments": {},
+    "pattern_notes": [
+      "High confidence failure - reduce confidence for similar patterns"
+    ]
+  },
+  {
+    "trade_id": "test1",
+    "timestamp": "2025-11-24T13:48:57.758541",
+    "prediction_error": null,
+    "prediction_correct": false,
+    "confidence_adjustment": -0.1,
+    "feature_weight_adjustments": {},
+    "pattern_notes": [
+      "High confidence failure - reduce confidence for similar patterns"
+    ]
+  },
+  {
+    "trade_id": "test1",
+    "timestamp": "2025-11-24T13:49:16.895046",
+    "prediction_error": null,
+    "prediction_correct": false,
+    "confidence_adjustment": -0.1,
+    "feature_weight_adjustments": {},
+    "pattern_notes": [
+      "High confidence failure - reduce confidence for similar patterns"
+    ]
+  },
+  {
+    "trade_id": "test1",
+    "timestamp": "2025-11-24T13:49:34.767903",
+    "prediction_error": null,
+    "prediction_correct": false,
+    "confidence_adjustment": -0.1,
+    "feature_weight_adjustments": {},
+    "pattern_notes": [
+      "High confidence failure - reduce confidence for similar patterns"
+    ]
+  },
+  {
+    "trade_id": "test1",
+    "timestamp": "2025-11-24T13:50:37.236927",
+    "prediction_error": null,
+    "prediction_correct": false,
+    "confidence_adjustment": -0.1,
+    "feature_weight_adjustments": {},
+    "pattern_notes": [
+      "High confidence failure - reduce confidence for similar patterns"
+    ]
+  },
+  {
+    "trade_id": "test1",
+    "timestamp": "2025-11-24T13:50:59.661690",
+    "prediction_error": null,
+    "prediction_correct": false,
+    "confidence_adjustment": -0.1,
+    "feature_weight_adjustments": {},
+    "pattern_notes": [
+      "High confidence failure - reduce confidence for similar patterns"
+    ]
+  },
+  {
+    "trade_id": "test1",
+    "timestamp": "2025-11-24T13:52:07.616343",
+    "prediction_error": null,
+    "prediction_correct": false,
+    "confidence_adjustment": -0.1,
+    "feature_weight_adjustments": {},
+    "pattern_notes": [
+      "High confidence failure - reduce confidence for similar patterns"
+    ]
+  },
+  {
+    "trade_id": "test1",
+    "timestamp": "2025-11-24T13:52:08.611259",
+    "prediction_error": null,
+    "prediction_correct": false,
+    "confidence_adjustment": -0.1,
+    "feature_weight_adjustments": {},
+    "pattern_notes": [
+      "High confidence failure - reduce confidence for similar patterns"
+    ]
+  },
+  {
+    "trade_id": "test1",
+    "timestamp": "2025-11-24T13:52:16.981748",
+    "prediction_error": null,
+    "prediction_correct": false,
+    "confidence_adjustment": -0.1,
+    "feature_weight_adjustments": {},
+    "pattern_notes": [
+      "High confidence failure - reduce confidence for similar patterns"
+    ]
+  },
+  {
+    "trade_id": "test1",
+    "timestamp": "2025-11-24T13:53:07.311673",
+    "prediction_error": null,
+    "prediction_correct": false,
+    "confidence_adjustment": -0.1,
+    "feature_weight_adjustments": {},
+    "pattern_notes": [
+      "High confidence failure - reduce confidence for similar patterns"
+    ]
+  },
+  {
+    "trade_id": "test1",
+    "timestamp": "2025-11-24T13:54:17.000215",
+    "prediction_error": null,
+    "prediction_correct": false,
+    "confidence_adjustment": -0.1,
+    "feature_weight_adjustments": {},
+    "pattern_notes": [
+      "High confidence failure - reduce confidence for similar patterns"
+    ]
+  },
+  {
+    "trade_id": "test1",
+    "timestamp": "2025-11-24T13:55:48.303680",
+    "prediction_error": null,
+    "prediction_correct": false,
+    "confidence_adjustment": -0.1,
+    "feature_weight_adjustments": {},
+    "pattern_notes": [
+      "High confidence failure - reduce confidence for similar patterns"
+    ]
+  },
+  {
+    "trade_id": "test1",
+    "timestamp": "2025-11-24T13:57:37.175125",
+    "prediction_error": null,
+    "prediction_correct": false,
+    "confidence_adjustment": -0.1,
+    "feature_weight_adjustments": {},
+    "pattern_notes": [
+      "High confidence failure - reduce confidence for similar patterns"
+    ]
+  },
+  {
+    "trade_id": "test1",
+    "timestamp": "2025-11-24T14:17:37.020715",
+    "prediction_error": null,
+    "prediction_correct": false,
+    "confidence_adjustment": -0.1,
+    "feature_weight_adjustments": {},
+    "pattern_notes": [
+      "High confidence failure - reduce confidence for similar patterns"
+    ]
+  },
+  {
+    "trade_id": "test1",
+    "timestamp": "2025-11-24T14:40:22.094122",
+    "prediction_error": null,
+    "prediction_correct": false,
+    "confidence_adjustment": -0.1,
+    "feature_weight_adjustments": {},
+    "pattern_notes": [
+      "High confidence failure - reduce confidence for similar patterns"
+    ]
+  },
+  {
+    "trade_id": "test1",
+    "timestamp": "2025-11-24T14:40:40.975382",
+    "prediction_error": null,
+    "prediction_correct": false,
+    "confidence_adjustment": -0.1,
+    "feature_weight_adjustments": {},
+    "pattern_notes": [
+      "High confidence failure - reduce confidence for similar patterns"
+    ]
+  },
+  {
+    "trade_id": "test1",
+    "timestamp": "2025-11-24T14:40:58.189090",
+    "prediction_error": null,
+    "prediction_correct": false,
+    "confidence_adjustment": -0.1,
+    "feature_weight_adjustments": {},
+    "pattern_notes": [
+      "High confidence failure - reduce confidence for similar patterns"
+    ]
+  },
+  {
+    "trade_id": "test1",
+    "timestamp": "2025-11-24T14:41:15.041656",
+    "prediction_error": null,
+    "prediction_correct": false,
+    "confidence_adjustment": -0.1,
+    "feature_weight_adjustments": {},
+    "pattern_notes": [
+      "High confidence failure - reduce confidence for similar patterns"
+    ]
+  }
+]
