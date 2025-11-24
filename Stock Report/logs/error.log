@@ -110,3 +110,74 @@ Traceback (most recent call last):
     from ..core.portable_paths import get_path
 ImportError: attempted relative import beyond top-level package
 
+[2025-11-24 20:59:23] CRITICAL[main][import]: Unexpected error during import | Exception: SyntaxError: expected 'except' or 'finally' block (menu_v15.py, line 152) | [HARD ERROR - FATAL]
+Traceback (most recent call last):
+  File "C:\Users\edwar\Documents\GitHub\Stock\Stock Report\V15\Stock Analyzer V15.py", line 93, in <module>
+    from ui.menu_v15 import MenuController
+  File "C:\Users\edwar\Documents\GitHub\Stock\Stock Report\V15\ui\menu_v15.py", line 152
+    class MenuController:
+    ^^^^^
+SyntaxError: expected 'except' or 'finally' block
+
+[2025-11-24 20:59:55] ERROR[menu][run]: Error in main menu loop | Exception: EOFError: EOF when reading a line
+Traceback (most recent call last):
+  File "C:\Users\edwar\Documents\GitHub\Stock\Stock Report\V15\ui\menu_v15.py", line 340, in run
+    choice = input("\nEnter choice: ").strip().upper()
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+EOFError: EOF when reading a line
+
+[2025-11-24 20:59:55] CRITICAL[menu][run]: FATAL ERROR in menu system | Exception: EOFError: EOF when reading a line | [HARD ERROR - FATAL]
+Traceback (most recent call last):
+  File "C:\Users\edwar\Documents\GitHub\Stock\Stock Report\V15\ui\menu_v15.py", line 340, in run
+    choice = input("\nEnter choice: ").strip().upper()
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+EOFError: EOF when reading a line
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\edwar\Documents\GitHub\Stock\Stock Report\V15\ui\menu_v15.py", line 371, in run
+    input("\nPress Enter to continue...")
+EOFError: EOF when reading a line
+
+[2025-11-24 20:59:55] CRITICAL[main][main]: Fatal error in main menu loop | Exception: EOFError: EOF when reading a line | [HARD ERROR - FATAL]
+Traceback (most recent call last):
+  File "C:\Users\edwar\Documents\GitHub\Stock\Stock Report\V15\ui\menu_v15.py", line 340, in run
+    choice = input("\nEnter choice: ").strip().upper()
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+EOFError: EOF when reading a line
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\edwar\Documents\GitHub\Stock\Stock Report\V15\Stock Analyzer V15.py", line 299, in main
+    menu.run()
+  File "C:\Users\edwar\Documents\GitHub\Stock\Stock Report\V15\ui\menu_v15.py", line 371, in run
+    input("\nPress Enter to continue...")
+EOFError: EOF when reading a line
+
+[2025-11-24 20:59:55] CRITICAL[main][__main__]: CRITICAL: Program failed to start | Exception: EOFError: EOF when reading a line | [HARD ERROR - FATAL]
+Traceback (most recent call last):
+  File "C:\Users\edwar\Documents\GitHub\Stock\Stock Report\V15\ui\menu_v15.py", line 340, in run
+    choice = input("\nEnter choice: ").strip().upper()
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+EOFError: EOF when reading a line
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\edwar\Documents\GitHub\Stock\Stock Report\V15\Stock Analyzer V15.py", line 299, in main
+    menu.run()
+  File "C:\Users\edwar\Documents\GitHub\Stock\Stock Report\V15\ui\menu_v15.py", line 371, in run
+    input("\nPress Enter to continue...")
+EOFError: EOF when reading a line
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\edwar\Documents\GitHub\Stock\Stock Report\V15\Stock Analyzer V15.py", line 336, in <module>
+    main()
+  File "C:\Users\edwar\Documents\GitHub\Stock\Stock Report\V15\Stock Analyzer V15.py", line 330, in main
+    input("\nPress Enter to exit...")
+EOFError: EOF when reading a line
+

@@ -12,7 +12,8 @@ from datetime import datetime
 from model.unified_model import UnifiedModel, get_model
 from model.feature_extractor import FeatureExtractor
 from core.portable_paths import get_path
-from learning.trade_tracker import get_trade_tracker
+from learning.trade_tracker import get_trade_tracker, TradeOutcome
+from learning.prediction_storage import get_prediction_storage
 
 
 class ModelTrainer:
@@ -22,6 +23,7 @@ class ModelTrainer:
         """Initialize model trainer."""
         self.feature_extractor = FeatureExtractor()
         self.trade_tracker = get_trade_tracker()
+        self.prediction_storage = get_prediction_storage()
     
     async def prepare_training_data(
         self,
@@ -44,8 +46,14 @@ class ModelTrainer:
         # Get trade outcomes for this timeframe
         outcomes = self.trade_tracker.get_outcomes()
         timeframe_outcomes = [o for o in outcomes if o.timeframe == timeframe]
+
+        prediction_outcomes = self._get_prediction_outcomes(timeframe)
+        combined_outcomes = sorted(
+            timeframe_outcomes + prediction_outcomes,
+            key=lambda o: o.entry_time
+        )
         
-        if len(timeframe_outcomes) < min_samples:
+        if len(combined_outcomes) < min_samples:
             return None
         
         # Prepare feature vectors and targets
@@ -53,7 +61,7 @@ class ModelTrainer:
         y_list = []
         
         # Process each trade outcome
-        for outcome in timeframe_outcomes:
+        for outcome in combined_outcomes:
             try:
                 # Fetch historical price data at entry time
                 # Get data up to entry time (need to fetch more and slice)
@@ -125,6 +133,22 @@ class ModelTrainer:
         y = np.array(y_list)
         
         return (X, y)
+
+    def _get_prediction_outcomes(self, timeframe: str) -> List[TradeOutcome]:
+        """Convert evaluated predictions for a timeframe into synthetic outcomes."""
+        try:
+            predictions = self.prediction_storage.get_predictions(interval=timeframe)
+        except Exception:
+            return []
+
+        outcomes: List[TradeOutcome] = []
+        for record in predictions:
+            if getattr(record, "evaluation_status", None) != "evaluated":
+                continue
+            outcome = TradeOutcome.from_prediction(record)
+            if outcome:
+                outcomes.append(outcome)
+        return outcomes
     
     def _features_to_array(self, features: Dict) -> Optional[np.ndarray]:
         """

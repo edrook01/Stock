@@ -11,48 +11,18 @@ from typing import Dict, List, Optional
 from pathlib import Path
 
 # Import V15 modules
-try:
-    from ..core.portable_paths import get_path
-    from ..core.ticker_universe import get_trading212_tickers
-    from ..core.prediction_scheduler import get_prediction_scheduler
-    from ..core.data_fetcher import fetch_prices
-    from ..core.timeframes import (
-        ALL_TIMEFRAMES,
-        CFD_TIMEFRAMES,
-        INVESTMENT_TIMEFRAMES,
-        CONSTANT_LEARNING_INTERVALS,
-        is_cfd_timeframe,
-        is_investment_timeframe,
-        is_valid_timeframe,
-    )
-    from ..core.indicators import rsi, sma, ema
-    from ..model.unified_model import get_model
-    from ..risk.profiles import RiskProfile, get_risk_profile
-    from ..risk.stop_loss import (
-        calculate_stop_loss_distance,
-        calculate_stop_loss_price,
-        should_skip_trade,
-    )
-    from ..risk.position_sizing import calculate_position_size_with_profile
-    from ..risk.equity_monitor import get_equity_monitor
-    from ..browser.automation import BrowserAutomation
-    from ..sentiment.override import get_sentiment_override
-    from ..sa_logging.trade_logger import get_trade_logger
-    from ..sa_logging.analyzer import generate_performance_report
-    from ..learning.prediction_generator import get_prediction_generator
-    # Import error logger
-    try:
-        from ..sa_logging.error_logger import log_exception, log_error, log_warning, log_info
-    except ImportError:
-        # Fallback if error_logger not available
-        def log_exception(*args, **kwargs): pass
-        def log_error(*args, **kwargs): pass
-        def log_warning(*args, **kwargs): pass
-        def log_info(*args, **kwargs): pass
-except ImportError:
-    # Fallback for direct execution
-    v15_root = Path(__file__).parent.parent
+# First, ensure V15 root is in sys.path for absolute imports
+v15_root = Path(__file__).parent.parent
+if str(v15_root) not in sys.path:
     sys.path.insert(0, str(v15_root))
+
+# Use absolute imports since we've set up sys.path
+# This avoids issues with relative imports when running as a script
+try:
+    # Fallback for direct execution
+    # v15_root already set above, just ensure it's in path
+    if str(v15_root) not in sys.path:
+        sys.path.insert(0, str(v15_root))
     from core.portable_paths import get_path
     from core.ticker_universe import get_trading212_tickers
     from core.prediction_scheduler import get_prediction_scheduler
@@ -65,6 +35,7 @@ except ImportError:
         is_cfd_timeframe,
         is_investment_timeframe,
         is_valid_timeframe,
+        get_timeframe_duration_seconds,
     )
     from core.indicators import rsi, sma, ema
     from model.unified_model import get_model
@@ -75,7 +46,37 @@ except ImportError:
         should_skip_trade,
     )
     from risk.position_sizing import calculate_position_size_with_profile
-    from risk.equity_monitor import get_equity_monitor
+    # Import risk.equity_monitor with special handling since it also uses relative imports
+    try:
+        from risk.equity_monitor import get_equity_monitor
+    except (ImportError, ValueError, SystemError):
+        # If that fails, manually import it using importlib to bypass relative import issues
+        import importlib.util
+        import types
+        
+        # Set up package structure so relative imports in equity_monitor work
+        # First, ensure 'core' package exists
+        if 'core' not in sys.modules:
+            core_package = types.ModuleType('core')
+            core_package.__path__ = [str(v15_root / "core")]
+            sys.modules['core'] = core_package
+        
+        # Ensure risk package is in sys.modules
+        if 'risk' not in sys.modules:
+            risk_package = types.ModuleType('risk')
+            risk_package.__path__ = [str(v15_root / "risk")]
+            sys.modules['risk'] = risk_package
+        
+        # Now load equity_monitor with proper package context
+        equity_monitor_spec = importlib.util.spec_from_file_location(
+            "risk.equity_monitor", v15_root / "risk" / "equity_monitor.py"
+        )
+        equity_monitor_module = importlib.util.module_from_spec(equity_monitor_spec)
+        equity_monitor_module.__package__ = 'risk'
+        equity_monitor_module.__name__ = 'risk.equity_monitor'
+        sys.modules['risk.equity_monitor'] = equity_monitor_module
+        equity_monitor_spec.loader.exec_module(equity_monitor_module)
+        get_equity_monitor = equity_monitor_module.get_equity_monitor
     from browser.automation import BrowserAutomation
     from sentiment.override import get_sentiment_override
     from learning.prediction_generator import get_prediction_generator
@@ -147,6 +148,48 @@ except ImportError:
             _write_error_direct(msg, None, component, function)
         def log_info(msg, component=None, function=None, **kwargs):
             pass  # Info logging is optional
+except Exception as e:
+    # If imports fail completely, provide minimal fallbacks
+    import traceback
+    print(f"ERROR: Failed to import V15 modules in menu_v15.py: {e}")
+    traceback.print_exc()
+    # Define minimal fallbacks to prevent further errors
+    def get_path(*args, **kwargs): return Path(__file__).parent.parent
+    def log_exception(*args, **kwargs): pass
+    def log_error(*args, **kwargs): pass
+    def log_warning(*args, **kwargs): pass
+    def log_info(*args, **kwargs): pass
+    # These will cause errors if used, but at least the module can load
+    ALL_TIMEFRAMES = []
+    CFD_TIMEFRAMES = []
+    INVESTMENT_TIMEFRAMES = []
+    CONSTANT_LEARNING_INTERVALS = []
+    def is_cfd_timeframe(*args): return False
+    def is_investment_timeframe(*args): return False
+    def is_valid_timeframe(*args): return False
+    class RiskProfile:
+        LOW = "low"
+        MEDIUM = "medium"
+        HIGH = "high"
+    def get_risk_profile(*args): return RiskProfile.MEDIUM
+    def get_equity_monitor(*args): return None
+    def get_trading212_tickers(*args): return []
+    def get_prediction_scheduler(*args): return None
+    def get_model(*args): return None
+    def get_prediction_generator(*args): return None
+    def get_trade_logger(*args): return None
+    def generate_performance_report(*args): return {}
+    class BrowserAutomation:
+        pass
+    def get_sentiment_override(*args): return None
+    def rsi(*args): return 50.0
+    def sma(*args): return 0.0
+    def ema(*args): return 0.0
+    def calculate_stop_loss_distance(*args): return 0.0
+    def calculate_stop_loss_price(*args): return 0.0
+    def should_skip_trade(*args): return False
+    def calculate_position_size_with_profile(*args): return 0.0
+    def fetch_prices(*args): return {}
 
 
 class MenuController:
@@ -158,6 +201,9 @@ class MenuController:
         self.current_profile = RiskProfile.MEDIUM
         self.browser_automation = None
         self._prediction_generator = None
+        # Rotate through ticker/timeframe batches when seeding prediction feed
+        self._seed_rotation_ticker = 0
+        self._seed_rotation_interval = 0
         
         # Load risk profile from config
         try:
@@ -215,18 +261,54 @@ class MenuController:
         except Exception:
             return ["1m", "5m", "10m", "15m", "1h", "1d", "1mo", "3mo", "1y"]
 
-    def _seed_prediction_feed(self, storage, per_interval: int = 1) -> int:
+    def _seed_prediction_feed(
+        self,
+        storage,
+        per_interval: int = 1,
+        max_tickers: int = 12,
+        max_intervals: int = 4,
+    ) -> int:
+        """
+        Populate the live prediction feed without freezing the UI.
+
+        The ticker universe can include hundreds of symbols, so this function
+        rotates through small batches to keep each seeding call fast while
+        eventually covering all available tickers/intervals.
+        """
         generator = self.prediction_generator
         if generator is None:
             return 0
+
+        tickers = self._get_active_tickers()
+        intervals = self._get_watch_intervals()
+        if not tickers or not intervals:
+            return 0
+
+        max_tickers = max(1, min(max_tickers, len(tickers)))
+        max_intervals = max(1, min(max_intervals, len(intervals)))
+
+        def _take_with_wrap(items, start_index, count):
+            if count >= len(items):
+                return list(items)
+            collected = []
+            idx = start_index % len(items)
+            for _ in range(count):
+                collected.append(items[idx])
+                idx = (idx + 1) % len(items)
+            return collected
+
+        selected_tickers = _take_with_wrap(tickers, self._seed_rotation_ticker, max_tickers)
+        selected_intervals = _take_with_wrap(intervals, self._seed_rotation_interval, max_intervals)
+
+        self._seed_rotation_ticker = (self._seed_rotation_ticker + max_tickers) % len(tickers)
+        self._seed_rotation_interval = (self._seed_rotation_interval + max_intervals) % len(intervals)
+
         try:
             created = generator.ensure_predictions(
-                tickers=self._get_active_tickers(),
-                intervals=self._get_watch_intervals(),
+                tickers=selected_tickers,
+                intervals=selected_intervals,
                 per_interval=max(1, per_interval),
             )
-            if created:
-                print(f"\n🧠 Generated {created} new predictions to seed the live feed.")
             return created
         except Exception as seed_error:
             try:
@@ -1443,7 +1525,11 @@ Please check logs/error.log for details.
             print(f"  Check Interval: {status['check_interval_hours']} hours")
             print(f"  Last Check: {status['last_check'] or 'Never'}")
             print(f"  Last Retrain: {status['last_retrain'] or 'Never'}")
-            print(f"  Available Trades: {status['available_trades']}")
+            print(f"  Available Trades: {status.get('available_trades', 0)}")
+            if status.get("available_prediction_samples") is not None:
+                print(f"  Prediction Samples: {status['available_prediction_samples']}")
+            if status.get("total_samples") is not None:
+                print(f"  Total Samples: {status['total_samples']}")
             print(f"  Should Retrain: {'Yes' if status['should_retrain'] else 'No'}")
             refresh_cycles = 3 if status['running'] else 1
             self._display_live_prediction_feed(refresh_cycles=refresh_cycles)
@@ -1573,58 +1659,162 @@ Please check logs/error.log for details.
 
     @staticmethod
     def _format_confidence(confidence: Optional[float]) -> str:
-        """Render confidence whether stored as 0-1 or 0-10."""
+        """Render confidence as a 1-10 rating whether stored as 0-1 or 1-10."""
         if confidence is None:
             return "N/A"
         if 0 <= confidence <= 1:
-            return f"{confidence * 100:.1f}%"
-        return f"{confidence:.2f}"
+            # Convert 0-1 scale to 1-10 scale: 0.0 -> 1.0, 0.5 -> 5.5, 1.0 -> 10.0
+            rating = 1 + (confidence * 9)
+            return f"{rating:.1f}"
+        # Already on 1-10 scale
+        return f"{confidence:.1f}"
 
     def _stream_interval_predictions(self, storage, refresh_seconds: float = 3.0) -> None:
-        """Continuously display interval predictions while learning runs."""
+        """Continuously display interval predictions while learning runs.
+        
+        Only prints each interval's prediction once per interval:
+        - On startup: prints all predictions
+        - After that: prints each prediction only when its interval elapses
+        (e.g., 1m predictions print once per minute, 1d predictions print once per day)
+        """
         print("\nStreaming interval predictions. Press Ctrl+C to stop.\n")
         self._seed_prediction_feed(storage, per_interval=1)
+        
+        # Track when each interval's prediction was last printed
+        # Key: interval string (e.g., "1m", "1d"), Value: timestamp of last print
+        last_print_times: Dict[str, float] = {}
+        is_startup = True  # Flag to print all predictions on startup
+        
         try:
             while True:
-                self._clear_console()
+                current_time = time.time()
                 predictions = storage.get_predictions()
+                
                 if not predictions:
                     created = self._seed_prediction_feed(storage, per_interval=1)
                     if created:
                         predictions = storage.get_predictions()
-                print("ACTIVE INTERVAL PREDICTIONS")
-                print("=" * 80)
-                if not predictions:
-                    print("No predictions available yet. Waiting for the learning engine...")
+                
+                # Separate active and elapsed predictions
+                all_active_predictions = [p for p in predictions if p.evaluation_status != "evaluated"]
+                elapsed_predictions = [p for p in predictions if p.evaluation_status == "evaluated"]
+                
+                # Filter active predictions to only show those that should be printed
+                active_predictions_to_show = []
+                
+                if is_startup:
+                    # On startup, show all active predictions
+                    active_predictions_to_show = all_active_predictions
+                    # Initialize last_print_times for all intervals found
+                    for record in all_active_predictions:
+                        interval = record.interval
+                        if interval not in last_print_times:
+                            last_print_times[interval] = current_time
+                    is_startup = False
                 else:
-                    header = (
-                        f"{'Ticker':<8} {'Interval':<8} {'Target':>10} {'Low':>10} "
-                        f"{'High':>10} {'Confidence':>12} {'Accuracy':>10} {'Status':>10}"
-                    )
-                    print(header)
-                    print("-" * len(header))
-                    sorted_predictions = sorted(
-                        predictions,
-                        key=lambda r: (r.interval, r.timestamp),
-                        reverse=True
-                    )
-                    for record in sorted_predictions:
-                        target = f"{record.predicted_price:.2f}" if record.predicted_price is not None else "N/A"
-                        low = f"{record.predicted_range_low:.2f}" if record.predicted_range_low is not None else "N/A"
-                        high = f"{record.predicted_range_high:.2f}" if record.predicted_range_high is not None else "N/A"
-                        confidence = self._format_confidence(record.confidence)
-                        accuracy = (
-                            f"{record.accuracy_score:.2f}"
-                            if record.evaluation_status == "evaluated" and record.accuracy_score is not None
-                            else ""
+                    # After startup, only show predictions whose interval has elapsed
+                    for record in all_active_predictions:
+                        interval = record.interval
+                        interval_duration = get_timeframe_duration_seconds(interval)
+                        
+                        if interval_duration is None:
+                            # Unknown interval, show it (fallback behavior)
+                            active_predictions_to_show.append(record)
+                            continue
+                        
+                        # Check if we've printed this interval before
+                        if interval not in last_print_times:
+                            # First time seeing this interval, print it
+                            active_predictions_to_show.append(record)
+                            last_print_times[interval] = current_time
+                        else:
+                            # Check if interval has elapsed since last print
+                            time_since_last_print = current_time - last_print_times[interval]
+                            if time_since_last_print >= interval_duration:
+                                # Interval has elapsed, print this prediction
+                                active_predictions_to_show.append(record)
+                                last_print_times[interval] = current_time
+                
+                # Only update display if there are predictions to show
+                if active_predictions_to_show or elapsed_predictions:
+                    self._clear_console()
+                    
+                    # Display active predictions
+                    if active_predictions_to_show:
+                        print("ACTIVE INTERVAL PREDICTIONS")
+                        print("=" * 80)
+                        header = (
+                            f"{'Ticker':<8} {'Interval':<8} {'Target':>10} {'Low':>10} "
+                            f"{'High':>10} {'Rating':>12} {'Accuracy':>10} {'Status':>10}"
                         )
-                        status = record.evaluation_status or "pending"
-                        print(
-                            f"{record.ticker[:8]:<8} {record.interval[:8]:<8} {target:>10} {low:>10} "
-                            f"{high:>10} {confidence:>12} {accuracy:>10} {status:>10}"
+                        print(header)
+                        print("-" * len(header))
+                        sorted_predictions = sorted(
+                            active_predictions_to_show,
+                            key=lambda r: (r.interval, r.timestamp),
+                            reverse=True
                         )
+                        for record in sorted_predictions:
+                            target = f"{record.predicted_price:.2f}" if record.predicted_price is not None else "N/A"
+                            low = f"{record.predicted_range_low:.2f}" if record.predicted_range_low is not None else "N/A"
+                            high = f"{record.predicted_range_high:.2f}" if record.predicted_range_high is not None else "N/A"
+                            confidence = self._format_confidence(record.confidence)
+                            accuracy = ""
+                            status = record.evaluation_status or "pending"
+                            print(
+                                f"{record.ticker[:8]:<8} {record.interval[:8]:<8} {target:>10} {low:>10} "
+                                f"{high:>10} {confidence:>12} {accuracy:>10} {status:>10}"
+                            )
+                    elif not predictions:
+                        print("ACTIVE INTERVAL PREDICTIONS")
+                        print("=" * 80)
+                        print("No predictions available yet. Waiting for the learning engine...")
+                    
+                    # Display elapsed predictions (always show if available)
+                    if elapsed_predictions:
+                        print("\nELAPSED PREDICTIONS (Evaluated)")
+                        print("=" * 80)
+                        elapsed_header = (
+                            f"{'Ticker':<8} {'Interval':<8} {'Predicted':>12} {'Actual High':>12} "
+                            f"{'Actual Low':>12} {'Actual Close':>12} {'Accuracy':>10}"
+                        )
+                        print(elapsed_header)
+                        print("-" * len(elapsed_header))
+                        sorted_elapsed = sorted(
+                            elapsed_predictions,
+                            key=lambda r: (r.interval, r.timestamp),
+                            reverse=True
+                        )
+                        for record in sorted_elapsed:
+                            predicted = f"{record.predicted_price:.2f}" if record.predicted_price is not None else "N/A"
+                            actual_high = (
+                                f"{record.actual_high:.2f}" 
+                                if record.actual_high is not None 
+                                else "N/A"
+                            )
+                            actual_low = (
+                                f"{record.actual_low:.2f}" 
+                                if record.actual_low is not None 
+                                else "N/A"
+                            )
+                            actual_close = (
+                                f"{record.actual_close:.2f}" 
+                                if record.actual_close is not None 
+                                else (f"{record.actual_price:.2f}" if record.actual_price is not None else "N/A")
+                            )
+                            accuracy = (
+                                f"{record.accuracy_score:.2f}"
+                                if record.accuracy_score is not None
+                                else "N/A"
+                            )
+                            print(
+                                f"{record.ticker[:8]:<8} {record.interval[:8]:<8} {predicted:>12} {actual_high:>12} "
+                                f"{actual_low:>12} {actual_close:>12} {accuracy:>10}"
+                            )
+                    
+                    print("\n(Streaming... Press Ctrl+C to return to the menu.)")
+                
                 self._seed_prediction_feed(storage, per_interval=1)
-                print("\n(Streaming... Press Ctrl+C to return to the menu.)")
                 time.sleep(max(1.0, refresh_seconds))
         except KeyboardInterrupt:
             print("\n\nStopping prediction stream. Returning to menu...")
@@ -1709,6 +1899,10 @@ Please check logs/error.log for details.
                 print(f"  Reason: {result.get('reason', result.get('error', 'Unknown'))}")
                 if 'available_trades' in result:
                     print(f"  Available Trades: {result['available_trades']}")
+                if 'available_predictions' in result:
+                    print(f"  Prediction Samples: {result['available_predictions']}")
+                if 'total_samples' in result:
+                    print(f"  Total Samples: {result['total_samples']}")
         
         except Exception as e:
             log_exception(

@@ -9,7 +9,8 @@ from pathlib import Path
 import json
 import sys
 
-from .trade_tracker import get_trade_tracker
+from .trade_tracker import get_trade_tracker, TradeOutcome
+from .prediction_storage import get_prediction_storage
 
 # Import portable_paths with fallback for direct execution
 try:
@@ -33,6 +34,7 @@ class ModelUpdater:
         """
         self.retrain_interval_days = retrain_interval_days
         self.trade_tracker = get_trade_tracker()
+        self.prediction_storage = get_prediction_storage()
         self.model_versions: List[Dict] = []
         self.last_retrain_date: Optional[datetime] = None
         self._load_model_history()
@@ -60,25 +62,34 @@ class ModelUpdater:
         Returns:
             Dictionary with training data, or None if insufficient data
         """
-        outcomes = self.trade_tracker.get_outcomes()
+        trade_outcomes = self.trade_tracker.get_outcomes()
+        prediction_outcomes = self._get_prediction_outcomes()
+        all_outcomes = trade_outcomes + prediction_outcomes
         
-        if len(outcomes) < min_trades:
+        if len(all_outcomes) < min_trades:
             return None
         
         # Get recent outcomes (last 6 months or all if less)
         cutoff_date = datetime.now() - timedelta(days=180)
         recent_outcomes = [
-            o for o in outcomes
+            o for o in all_outcomes
             if o.entry_time >= cutoff_date
         ]
         
         if len(recent_outcomes) < min_trades:
-            recent_outcomes = outcomes[-min_trades:]  # Use most recent N trades
+            recent_outcomes = sorted(all_outcomes, key=lambda o: o.entry_time)[-min_trades:]  # Use most recent samples
+        
+        prediction_samples = sum(1 for o in recent_outcomes if o.trade_id.startswith("prediction-"))
+        trade_samples = len(recent_outcomes) - prediction_samples
         
         # Prepare training data
         training_data = {
             "outcomes": [o.to_dict() for o in recent_outcomes],
             "total_trades": len(recent_outcomes),
+            "source_breakdown": {
+                "trade_samples": trade_samples,
+                "prediction_samples": prediction_samples,
+            },
             "date_range": {
                 "start": min(o.entry_time for o in recent_outcomes).isoformat(),
                 "end": max(o.exit_time for o in recent_outcomes).isoformat()
@@ -206,6 +217,32 @@ class ModelUpdater:
             # Silent failure on load errors
             self.model_versions = []
             self.last_retrain_date = None
+
+    def _get_prediction_outcomes(self) -> List[TradeOutcome]:
+        """Convert evaluated predictions into synthetic trade outcomes."""
+        try:
+            predictions = self.prediction_storage.get_predictions()
+        except Exception:
+            return []
+
+        outcomes: List[TradeOutcome] = []
+        for record in predictions:
+            if getattr(record, "evaluation_status", None) != "evaluated":
+                continue
+            outcome = TradeOutcome.from_prediction(record)
+            if outcome:
+                outcomes.append(outcome)
+        return outcomes
+
+    def get_sample_counts(self) -> Dict[str, int]:
+        """Return counts of available trade and prediction samples."""
+        trade_count = len(self.trade_tracker.get_outcomes())
+        prediction_count = len(self._get_prediction_outcomes())
+        return {
+            "trade_samples": trade_count,
+            "prediction_samples": prediction_count,
+            "total_samples": trade_count + prediction_count,
+        }
 
 
 # Global model updater instance

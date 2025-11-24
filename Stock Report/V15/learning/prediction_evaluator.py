@@ -9,12 +9,24 @@ import random
 from datetime import datetime
 from typing import Dict, List, Optional
 
+_import_error: Optional[str] = None
 try:
     from core.data_fetcher import fetch_prices
-except Exception:
+    FETCH_PRICES_AVAILABLE = True
+except Exception as e:
     fetch_prices = None  # type: ignore
+    FETCH_PRICES_AVAILABLE = False
+    _import_error = str(e)
 
 from learning.prediction_storage import PredictionRecord, get_prediction_storage
+
+# Try to import logging for error reporting
+try:
+    from sa_logging.error_logger import log_warning, log_error, log_info
+except Exception:
+    def log_warning(*args, **kwargs): pass
+    def log_error(*args, **kwargs): pass
+    def log_info(*args, **kwargs): pass
 
 
 class PredictionEvaluator:
@@ -22,21 +34,41 @@ class PredictionEvaluator:
 
     def __init__(self) -> None:
         self.storage = get_prediction_storage()
+        if not FETCH_PRICES_AVAILABLE:
+            log_warning(
+                "PredictionEvaluator: fetch_prices not available - predictions will use fallback data",
+                component="prediction_evaluator",
+                function="__init__",
+                context={"import_error": _import_error or "Unknown"}
+            )
 
     def evaluate_prediction(self, prediction: PredictionRecord) -> Dict[str, Dict[str, float]]:
+        """
+        Evaluate a prediction against actual market data.
+        Fetches real market prices if not already stored.
+        """
         actual_prices = {
             "close": prediction.actual_close if prediction.actual_close is not None else prediction.actual_price,
             "high": prediction.actual_high,
             "low": prediction.actual_low,
         }
+        
+        # Track whether we're using stored data or fetching new data
+        using_stored_data = actual_prices["close"] is not None
+        
         if actual_prices["close"] is None:
+            # Fetch actual market data
             actual_prices = self._fetch_actual_prices(
                 prediction.ticker,
                 prediction.interval,
                 prediction.predicted_price,
             )
-
+            using_stored_data = False
+        
+        # Calculate accuracy metrics
         accuracy = self._calculate_accuracy(prediction, actual_prices)
+        
+        # Update prediction record with actual prices and accuracy
         prediction.actual_price = actual_prices.get("close")
         prediction.actual_close = actual_prices.get("close")
         prediction.actual_high = actual_prices.get("high")
@@ -51,6 +83,23 @@ class PredictionEvaluator:
         prediction.evaluation_status = "evaluated"
         prediction.updated_at = datetime.utcnow()
         self.storage.update_prediction(prediction)
+        
+        # Log evaluation result
+        log_info(
+            f"PredictionEvaluator: Evaluated prediction for {prediction.ticker} {prediction.interval}",
+            component="prediction_evaluator",
+            function="evaluate_prediction",
+            context={
+                "ticker": prediction.ticker,
+                "interval": prediction.interval,
+                "predicted_price": prediction.predicted_price,
+                "actual_price": actual_prices.get("close"),
+                "accuracy": accuracy["accuracy_scores"]["overall_accuracy"],
+                "using_stored_data": using_stored_data,
+                "data_source": "stored" if using_stored_data else "fetched"
+            }
+        )
+        
         return accuracy
 
     def evaluate_pending_predictions(self, interval: Optional[str] = None, max_predictions: int = 10) -> List[PredictionRecord]:
@@ -60,8 +109,44 @@ class PredictionEvaluator:
             self.evaluate_prediction(prediction)
             results.append(prediction)
         return results
+    
+    def verify_data_fetcher(self, test_ticker: str = "AAPL", test_interval: str = "1d") -> Dict[str, any]:
+        """
+        Verify that the data fetcher is working and can retrieve real market data.
+        Returns a dict with verification status and details.
+        """
+        result = {
+            "fetch_prices_available": FETCH_PRICES_AVAILABLE,
+            "can_fetch_data": False,
+            "test_ticker": test_ticker,
+            "test_interval": test_interval,
+            "error": None,
+            "sample_price": None
+        }
+        
+        if not FETCH_PRICES_AVAILABLE:
+            result["error"] = "fetch_prices import failed - cannot verify data fetcher"
+            return result
+        
+        try:
+            test_prices = self._fetch_actual_prices(test_ticker, test_interval, 100.0)
+            if test_prices and test_prices.get("close") and test_prices["close"] != 100.0:
+                # If we got a price different from the fallback, we likely got real data
+                result["can_fetch_data"] = True
+                result["sample_price"] = test_prices["close"]
+            else:
+                result["error"] = "Data fetcher returned fallback price - real data may not be available"
+        except Exception as e:
+            result["error"] = str(e)
+        
+        return result
 
     def _fetch_actual_prices(self, ticker: str, interval: str, fallback_price: float) -> Dict[str, float]:
+        """
+        Fetch actual market prices for a ticker/interval.
+        Returns dict with 'close', 'high', 'low' prices.
+        Logs warnings if real data cannot be fetched.
+        """
         default = {
             "close": fallback_price,
             "high": fallback_price,
@@ -69,6 +154,12 @@ class PredictionEvaluator:
         }
 
         if fetch_prices is None:
+            log_warning(
+                f"PredictionEvaluator: Cannot fetch real data for {ticker} {interval} - fetch_prices not available, using fallback",
+                component="prediction_evaluator",
+                function="_fetch_actual_prices",
+                context={"ticker": ticker, "interval": interval}
+            )
             return default
 
         try:
@@ -83,13 +174,37 @@ class PredictionEvaluator:
                 close_price = float(last_row.get("Close", fallback_price))
                 high_price = float(last_row.get("High", close_price))
                 low_price = float(last_row.get("Low", close_price))
+                log_info(
+                    f"PredictionEvaluator: Successfully fetched real market data for {ticker} {interval}",
+                    component="prediction_evaluator",
+                    function="_fetch_actual_prices",
+                    context={
+                        "ticker": ticker,
+                        "interval": interval,
+                        "close": close_price,
+                        "high": high_price,
+                        "low": low_price
+                    }
+                )
                 return {"close": close_price, "high": high_price, "low": low_price}
-        except Exception:
-            pass
+        except Exception as e:
+            log_error(
+                f"PredictionEvaluator: Failed to fetch real data for {ticker} {interval}, using fallback",
+                component="prediction_evaluator",
+                function="_fetch_actual_prices",
+                context={"ticker": ticker, "interval": interval, "error": str(e)}
+            )
 
         # Fallback: small random drift around predicted price to avoid repeated ties
+        # WARNING: This is NOT real market data - predictions evaluated with this are not validated
         rng = random.Random(f"{ticker}_{interval}")
         noisy_price = max(0.01, fallback_price + rng.uniform(-1.5, 1.5))
+        log_warning(
+            f"PredictionEvaluator: Using FALLBACK (synthetic) data for {ticker} {interval} - prediction NOT validated against real market data",
+            component="prediction_evaluator",
+            function="_fetch_actual_prices",
+            context={"ticker": ticker, "interval": interval, "fallback_price": noisy_price}
+        )
         return {"close": noisy_price, "high": noisy_price, "low": noisy_price}
 
     @staticmethod

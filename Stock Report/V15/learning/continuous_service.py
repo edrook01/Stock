@@ -206,10 +206,13 @@ class ContinuousLearningService:
             # Get training data
             training_data = self.model_updater.get_training_data(min_trades=50)
             if training_data is None:
+                sample_counts = self.model_updater.get_sample_counts()
                 return {
                     "retrained": False,
-                    "reason": "Insufficient training data (need at least 50 trades)",
-                    "available_trades": len(self.model_updater.trade_tracker.get_outcomes())
+                    "reason": "Insufficient training data (need at least 50 samples)",
+                    "available_trades": sample_counts["trade_samples"],
+                    "available_predictions": sample_counts["prediction_samples"],
+                    "total_samples": sample_counts["total_samples"],
                 }
             
             logger.info(f"Starting model retraining with {training_data['total_trades']} trades")
@@ -270,15 +273,19 @@ class ContinuousLearningService:
         Returns:
             Dictionary with service status
         """
-        return {
+        sample_counts = self.model_updater.get_sample_counts()
+        status = {
             "running": self.running,
             "check_interval_hours": self.check_interval_hours,
             "last_check": self.last_check.isoformat() if self.last_check else None,
             "should_retrain": self.model_updater.should_retrain(),
             "last_retrain": self.model_updater.last_retrain_date.isoformat() if self.model_updater.last_retrain_date else None,
             "last_training_result": self.last_training_result,
-            "available_trades": len(self.model_updater.trade_tracker.get_outcomes())
+            "available_trades": sample_counts["trade_samples"],
         }
+        status["available_prediction_samples"] = sample_counts["prediction_samples"]
+        status["total_samples"] = sample_counts["total_samples"]
+        return status
     
     def _save_state(self) -> None:
         """Save service state to file."""

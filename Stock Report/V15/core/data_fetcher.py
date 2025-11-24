@@ -117,13 +117,13 @@ def _generate_sample_price_data(ticker: str, interval: str, periods: int = 200) 
         "10m": "10min",
         "15m": "15min",
         "30m": "30min",
-        "1h": "1H",
-        "4h": "4H",
+        "1h": "1h",
+        "4h": "4h",
         "1d": "1D",
         "1w": "1W",
-        "1mo": "1M",
-        "3mo": "3M",
-        "1y": "1Y",
+        "1mo": "1ME",
+        "3mo": "3ME",
+        "1y": "1YE",
     }
     freq = freq_map.get(interval.lower(), "1D")
     end = datetime.now()

@@ -20,12 +20,15 @@ The module will:
 No configuration or path changes needed - just move the file/folder and it works!
 """
 
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, TYPE_CHECKING
 from datetime import datetime
 from pathlib import Path
 import json
 import sys
 import time
+
+if TYPE_CHECKING:  # Avoid runtime import cycles
+    from learning.prediction_storage import PredictionRecord
 
 # Version-portable path resolution
 # Automatically finds project root regardless of version number or location
@@ -282,6 +285,63 @@ class TradeOutcome:
             sentiment_score=data.get("sentiment_score"),
             market_condition=data.get("market_condition"),
             indicators=data.get("indicators", {})
+        )
+
+    @classmethod
+    def from_prediction(cls, prediction: "PredictionRecord") -> Optional["TradeOutcome"]:
+        """
+        Create a synthetic TradeOutcome from an evaluated PredictionRecord so
+        elapsed predictions can be reused as learning samples.
+        """
+        actual_close = prediction.actual_close or prediction.actual_price
+        if actual_close is None:
+            return None
+
+        metadata = prediction.metadata or {}
+        base_price = metadata.get("base_price")
+        movement_pct = metadata.get("movement_pct")
+
+        if base_price is None and movement_pct is not None:
+            try:
+                base_price = prediction.predicted_price / (1 + movement_pct / 100.0)
+            except ZeroDivisionError:
+                base_price = prediction.predicted_price
+        if base_price is None or base_price <= 0:
+            base_price = prediction.predicted_price
+
+        if movement_pct is None and base_price:
+            movement_pct = ((prediction.predicted_price - base_price) / base_price) * 100.0
+        movement_pct = movement_pct or 0.0
+
+        direction = "LONG" if movement_pct >= 0 else "SHORT"
+        entry_time = prediction.timestamp
+        exit_time = prediction.updated_at or prediction.timestamp
+
+        raw_pct = ((actual_close - base_price) / base_price) * 100.0 if base_price else 0.0
+        actual_outcome = raw_pct if direction == "LONG" else -raw_pct
+        pnl_amount = (actual_close - base_price) if direction == "LONG" else (base_price - actual_close)
+        pnl_percentage = (pnl_amount / base_price) * 100.0 if base_price else 0.0
+
+        return cls(
+            trade_id=f"prediction-{prediction.prediction_id}",
+            ticker=prediction.ticker,
+            direction=direction,
+            entry_time=entry_time,
+            entry_price=base_price,
+            exit_time=exit_time,
+            exit_price=actual_close,
+            exit_reason="ELAPSED_PREDICTION",
+            position_size=1.0,
+            stop_price=prediction.predicted_range_low or base_price,
+            target_price=prediction.predicted_range_high or base_price,
+            confidence=prediction.confidence,
+            timeframe=prediction.interval,
+            predicted_outcome=movement_pct,
+            actual_outcome=actual_outcome,
+            pnl=pnl_amount,
+            pnl_percentage=pnl_percentage,
+            prediction_id=prediction.prediction_id,
+            indicators=metadata.get("indicators", {}),
         )
 
 
