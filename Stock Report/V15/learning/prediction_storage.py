@@ -53,6 +53,8 @@ except Exception:
             "1d": timedelta(days=1),
             "1w": timedelta(weeks=1),
             "1mo": timedelta(days=30),
+            "3mo": timedelta(days=90),
+            "1y": timedelta(days=365),
         }
         return mapping.get(interval.lower(), timedelta(days=1))
 
@@ -109,8 +111,12 @@ class PredictionRecord:
     source: str
     evaluation_status: str = "pending"
     actual_price: Optional[float] = None
+    actual_high: Optional[float] = None
+    actual_low: Optional[float] = None
+    actual_close: Optional[float] = None
     accuracy_score: Optional[float] = None
     confidence_calibration: Optional[float] = None
+    accuracy_breakdown: Dict[str, float] = field(default_factory=dict)
     metadata: Dict[str, Any] = field(default_factory=dict)
     created_at: datetime = field(default_factory=datetime.utcnow)
     updated_at: datetime = field(default_factory=datetime.utcnow)
@@ -128,6 +134,13 @@ class PredictionRecord:
         parsed["timestamp"] = datetime.fromisoformat(parsed["timestamp"])
         parsed["created_at"] = datetime.fromisoformat(parsed["created_at"])
         parsed["updated_at"] = datetime.fromisoformat(parsed["updated_at"])
+        parsed.setdefault("actual_price", None)
+        parsed.setdefault("actual_high", None)
+        parsed.setdefault("actual_low", None)
+        parsed.setdefault("actual_close", None)
+        parsed.setdefault("accuracy_score", None)
+        parsed.setdefault("confidence_calibration", None)
+        parsed.setdefault("accuracy_breakdown", {})
         return cls(**parsed)
 
 
